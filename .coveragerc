@@ -1,0 +1,7 @@
+# .coveragerc to control coverage.py
+[run]
+branch = True
+
+[report]
+source = honeysap/
+omit = honeysap/test/
