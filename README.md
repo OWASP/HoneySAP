@@ -1,10 +1,9 @@
 HoneySAP: SAP Low-interaction honeypot
 ======================================
 
-Copyright (C) 2015 by Martin Gallo, Core Security
+Copyright (C) 2015 by Martin Gallo, SecureAuth
 
-The tool was designed and developed by Martin Gallo from the Security
-Consulting Services team of Core Security.
+The tool was designed and developed by Martin Gallo from the SecureAuth's SecureAuthLabs team.
 
 Version 0.1.1.dev0 (XXX 2015)
 
@@ -57,5 +56,5 @@ Contact
 -------
 
 Whether you want to report a bug or give some suggestions on this package, drop
-us a few lines at `oss@coresecurity.com` or contact the author email 
-`mgallo@coresecurity.com`.
+us a few lines at `oss@secureauth.com` or contact the author email 
+`mgallo@secureauth.com`.
