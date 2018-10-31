@@ -50,7 +50,7 @@ setup(name=honeysap.__name__,   # Package information
                'bin/honeysapeater'],
 
       # Tests command
-      test_suite='tests.suite',
+      test_suite='tests.test_suite',
 
       # Requirements
       install_requires=open('requirements.txt').read().splitlines(),

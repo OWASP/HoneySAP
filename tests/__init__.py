@@ -18,34 +18,14 @@
 # ==============
 
 # Standard imports
+import sys
 import unittest
-# Custom imports
-from tests import base_test
-from tests import config_test
-from tests import datastore_test
-from tests import event_test
-from tests import feed_test
-from tests import service_test
-from tests import session_test
-
-from tests import feeds
-from tests import services
 
 
-def suite():
-    suite = unittest.TestSuite()
-    suite.addTests(base_test.suite())
-    suite.addTests(config_test.suite())
-    suite.addTests(datastore_test.suite())
-    suite.addTests(event_test.suite())
-    suite.addTests(feed_test.suite())
-    suite.addTests(session_test.suite())
-    suite.addTests(service_test.suite())
-
-    suite.addTests(feeds.suite())
-    suite.addTests(services.suite())
-    return suite
+test_suite = unittest.defaultTestLoader.discover('.', '*_test.py')
 
 
 if __name__ == '__main__':
-    unittest.TextTestRunner(verbosity=2).run(suite())
+    test_runner = unittest.TextTestRunner(verbosity=2, resultclass=unittest.TextTestResult)
+    result = test_runner.run(test_suite)
+    sys.exit(not result.wasSuccessful())

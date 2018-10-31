@@ -130,7 +130,7 @@ class DataStoreManagerTest(unittest.TestCase):
             DataStoreManager(Configuration({"datastore_class": "InexistentClass"}))
 
 
-def suite():
+def test_suite():
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     suite.addTest(loader.loadTestsFromTestCase(BaseDataStoreTest))
@@ -140,4 +140,4 @@ def suite():
 
 
 if __name__ == "__main__":
-    unittest.TextTestRunner(verbosity=2).run(suite())
+    unittest.TextTestRunner(verbosity=2).run(test_suite())

@@ -56,7 +56,7 @@ class EventTest(unittest.TestCase):
         self.assertEqual(event_json["target_port"], session.target_port)
 
 
-def suite():
+def test_suite():
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     suite.addTest(loader.loadTestsFromTestCase(EventTest))
@@ -64,4 +64,4 @@ def suite():
 
 
 if __name__ == "__main__":
-    unittest.TextTestRunner(verbosity=2).run(suite())
+    unittest.TextTestRunner(verbosity=2).run(test_suite())
