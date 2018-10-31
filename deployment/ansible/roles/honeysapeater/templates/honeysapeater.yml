@@ -1,0 +1,47 @@
+# HoneSAPEater configuration
+# =====================
+
+# Eater configuration
+# -------------------
+
+# Output type
+eater_output:
+
+  # Output events to the standard output 
+  - stdout
+  # Output events to a file
+  - file
+
+
+# Output filename
+eater_filename: {{ honeysap_eater_filename }}
+
+
+# Console logging configuration
+# -----------------------------
+
+# Level of console logging
+verbose: 3
+
+# Log events of all namespaces
+verbose_all: true
+
+# Use colored output
+colored_console: true
+
+
+# Feeds configuration
+# -------------------
+
+feeds:
+{% if honeysap_hpfeeds %}
+    -
+        feed: HPFeed
+        channels:
+            - {{ honeysap_hpfeeds_channels }}
+        feed_host: {{ honeysap_hpfeeds_host }}
+        feed_port: {{ honeysap_hpfeeds_port }}
+        feed_ident: {{ honeysap_hpfeeds_ident }}
+        feed_secret: {{ honeysap_hpfeeds_secret }}
+        enabled: yes
+{% endif %}

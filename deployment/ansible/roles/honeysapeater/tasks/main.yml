@@ -1,0 +1,43 @@
+---
+
+- name: Update apt package cache
+  apt: update_cache=yes
+
+- name: Upgrade to the latest packages
+  apt: upgrade=safe
+
+- name: Install required system packages
+  apt: >
+    name="{{ item }}"
+    update_cache=yes
+    state=latest
+  with_items: honeysap_system_packages
+
+- name: Install required python libraries
+  pip: >
+    name="{{ item }}"
+    state=latest
+  with_items: honeysap_python_packages
+
+- name: Create user for running HoneySAPEater
+  user: >
+    name="{{ honeysap_username }}"
+    home="/home/{{ honeysap_username }}"
+
+- name: Install HoneySAP 
+  pip: name="file://{{ honeysap_path }}" extra_args="-e"
+
+- name: Configuring HoneySAP
+  template: src=honeysapeater.yml dest="{{ honeysap_config }}" owner="{{ honeysap_username }}" mode=755
+  when: honeysap_config is defined
+
+- name: Create supervisord config
+  template: src=honeysapeater.conf dest="/etc/supervisor/conf.d/{{ honeysap_service }}.conf"
+
+- name: Add HoneySAP to supervisord
+  supervisorctl: name="{{ honeysap_service }}" state=present
+
+- name: Reloading configuration for HoneySAP
+  shell: >
+    /usr/bin/supervisorctl reread;
+    /usr/bin/supervisorctl update {{ honeysap_service }}

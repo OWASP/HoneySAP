@@ -1,0 +1,16 @@
+# Playbook for running HoneySAP and send data to an HPFeeds broker
+
+- hosts: all
+  sudo: yes
+  roles:
+    - { role: ansible-honeysap,
+        honeysap_feeds:
+          { feed: HPFeed,
+            channels: [ honeysap.events ],
+            feed_host: 10.250.250.20,
+            feed_port: 20000,
+            feed_ident: honeysap,
+            feed_secret: password,
+            enabled: yes,
+          }
+      }

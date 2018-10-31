@@ -1,0 +1,82 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+#
+# Vagrant file for running HoneySAP
+#
+
+
+# Vagrantfile API/syntax version. Don't touch unless you know what you're doing!
+VAGRANTFILE_API_VERSION = "2"
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+
+  # VM for running the actual HoneySAP
+  config.vm.define "honeysap" do |honeysap|
+
+    honeysap.vm.box = "ubuntu/trusty64"
+
+    # Set the private network
+    honeysap.vm.network "private_network", ip: "10.250.250.10"
+
+    # Provision configuration
+    honeysap.vm.provision "ansible" do |ansible|
+      ansible.playbook = "ansible/honeysap.yml"
+      ansible.verbose = "vvv"
+    end
+
+    # Sync honeysap folder so we can install honeysapeater
+    honeysap.vm.synced_folder "../", "/opt/honeysap"
+
+  end
+
+  # VM for running the HPFeeds broker
+  config.vm.define "broker" do |broker|
+
+    broker.vm.box = "ubuntu/trusty64"
+
+    # Set the private network
+    broker.vm.network "private_network", ip: "10.250.250.20"
+
+    # Provision configuration
+    broker.vm.provision "ansible" do |ansible|
+      ansible.playbook = "ansible/broker.yml"
+      ansible.verbose = "vvv"
+    end
+
+  end
+
+
+  # VM for running an ELK stack
+  config.vm.define "honeysapelk" do |honeysapelk|
+
+    honeysapelk.vm.box = "ubuntu/trusty64"
+
+    # Set the private network
+    honeysapelk.vm.network "private_network", ip: "10.250.250.30"
+
+    # Forward Kibana port
+    honeysapelk.vm.network "forwarded_port", guest: 80, host: 8080
+
+    # Provision configuration
+    honeysapelk.vm.provision "ansible" do |ansible|
+      ansible.playbook = "ansible/honeysapelk.yml"
+      ansible.verbose = "vvv"
+    end
+
+    # Sync honeysap folder so we can install honeysapeater
+    honeysapelk.vm.synced_folder "../", "/opt/honeysap"
+
+    # Setup this machine with 2Gb
+    honeysapelk.vm.provider "virtualbox" do |vb|
+      vb.customize ["modifyvm", :id, "--memory", "2048"]
+    end
+
+  end
+
+  # Set general memory for all machines
+  config.vm.provider "virtualbox" do |vb|
+    vb.customize ["modifyvm", :id, "--memory", "1024"]
+  end
+
+end

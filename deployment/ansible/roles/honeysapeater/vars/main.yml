@@ -1,0 +1,32 @@
+---
+
+# Required system packages 
+honeysap_system_packages:
+  - git
+  - python-pip
+  - python-dev
+  - build-essential
+
+# Required python packages
+honeysap_python_packages:
+  - 
+
+# Path where the HoneySAP code is available. This should be paired with the folder
+# syncing configuration if using it with Vagrant
+honeysap_path: /opt/honeysap
+
+# Name of the service
+honeysap_service: honeysapeater
+
+# Username for running the service
+honeysap_username: vagrant
+
+# Path to the configuration file to use
+honeysap_config: /opt/honeysap/honeysapeater-vm.yml
+
+# Path to the file to write the standard and error output
+honeysap_stdout_logfile: /opt/honeysap/honeysapeater_stdout.log
+honeysap_stderr_logfile: /opt/honeysap/honeysapeater_stderr.log
+
+# Path to the file to write the events
+honeysap_eater_filename: /opt/honeysap/honeysapeater.log

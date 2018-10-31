@@ -1,0 +1,35 @@
+---
+
+- name: Update apt package cache
+  apt: update_cache=yes
+
+- name: Upgrade to the latest packages
+  apt: upgrade=safe
+
+- name: Install required system packages
+  apt: >
+    name="{{ item }}"
+    update_cache=yes
+    state=latest
+  with_items: supervisord_system_packages
+
+- name: Install required python libraries
+  pip: >
+    name="{{ item }}"
+    state=latest
+  with_items: supervisord_python_packages
+
+- name: Install supervisord
+  pip: name="supervisor"
+
+- name: Create supervisord config folder
+  file: dest=/etc/supervisor state=directory owner=root
+
+- name: Create supervisord config
+  template: src=supervisord.conf dest="/etc/{{ supervisord_config_file }}"
+
+- name: Create supervisord init script
+  template: src=supervisord.sh dest="/etc/init.d/{{ supervisord_service }}" mode=0755
+
+- name: Start and enable supervisord service
+  service: name="{{ supervisord_service }}" state=started enabled=yes

@@ -1,0 +1,15 @@
+# Playbook for running an HPFeeds broker (Tentacool - https://github.com/tentacool/tentacool)
+
+- hosts: all
+  sudo: yes
+  roles:
+    # The HPFeeds broker
+    - { role: martingalloar.tentacool,
+        tentacool_broker_name: honeysap,
+        tentacool_auth: [
+          { identifier: "honeysap",
+            secret: "password",
+            publish: "honeysap.events",
+            subscribe: "honeysap.events" },
+        ]
+      }

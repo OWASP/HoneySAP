@@ -1,0 +1,17 @@
+input {
+    file {
+        path => "{{ honeysap_eater_filename }}"
+        type => "honeysap"
+    }
+}
+filter {
+  json {
+    source => message
+  }
+}
+output {
+  elasticsearch {
+    host => localhost
+  }
+  stdout { codec => rubydebug }
+}

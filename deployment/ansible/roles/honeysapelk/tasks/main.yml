@@ -1,0 +1,5 @@
+---
+
+- name: Copy the logstash configuration for HoneySAP
+  template: src="honeysap.conf.j2" dest="{{ honeysapelk_logstash_config }}"
+

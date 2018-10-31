@@ -1,0 +1,12 @@
+---
+
+supervisord_system_packages:
+  - python-pip
+
+supervisord_python_packages:
+
+# Name of the service
+supervisord_service: supervisord
+
+# Name of the configuration file
+supervisord_config_file: supervisord.conf

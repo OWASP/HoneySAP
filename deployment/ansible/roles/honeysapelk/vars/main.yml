@@ -1,0 +1,3 @@
+---
+
+honeysapelk_logstash_config: /etc/logstash/conf.d/honeysap.conf
