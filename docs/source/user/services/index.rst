@@ -23,10 +23,10 @@ The TCP port where the service will be listening to connections.
 ``virtual``:
 
 Services in HoneySAP can be configured as *virtual services*. When configured
-in such mode, the service is not binded to an actual listener address but
+in such mode, the service is not bind to an actual listener address but
 instead listening on a virtual address/port. This is required in order to allow
 routing of different services to virtual internal addresses, for example, in the
-:doc:`saprouter`. 
+:doc:`saprouter`.
 
 ``alias``:
 
@@ -39,3 +39,12 @@ Common services
 .. toctree::
 
    forwarder
+
+
+SAP Services
+------------
+
+.. toctree::
+
+   saprouter
+   dispatcher

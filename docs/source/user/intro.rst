@@ -7,14 +7,14 @@ Objective
 ---------
 
 HoneySAP is a low-interaction research-focused honeypot specific for SAP
-services. The main objective is to allow security profesionals, researchers and
-organizations lear about the techniques and motivations behind attacks against
+services. The main objective is to allow security professionals, researchers and
+organizations learn about the techniques and motivations behind attacks against
 SAP systems.
 
 The goals set for this project are:
 
 * Have a specific purpose honeypot for SAP services.
-* Be able to identify the behaviour of those attacking SAP systems.
+* Be able to identify the behavior of those attacking SAP systems.
 * Be flexible and allow deployment of different scenarios.
 * Allow easy extension and improvement of the software.
 
@@ -33,8 +33,8 @@ of sharing the information (feeds) or other components.
 Modular
 ^^^^^^^
 
-Functionality should be implemented in a modular way allowing the plugin or
-plugout of the different components. Modules should be configurable as much as
+Functionality should be implemented in a modular way allowing the plug-in or
+plug-out of the different components. Modules should be configurable as much as
 possible.
 
 Easy configuration

@@ -1,10 +1,10 @@
 # ===========
 # HoneySAP - SAP low-interaction honeypot
 #
-# Copyright (C) 2015 by Martin Gallo, Core Security
+# Copyright (C) 2015 by Martin Gallo, SecureAuth Corporation
 #
-# The library was designed and developed by Martin Gallo from the Security
-# Consulting Services team of Core Security.
+# The library was designed and developed by Martin Gallo from
+# SecureAuth Corporation's Labs team.
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -25,7 +25,7 @@ HoneySAP is a low-interaction research-focused honeypot specific for SAP
 services. It's aimed at learn the techniques and motivations behind attacks
 against SAP systems.
 
-:copyright: (c) 2015 by Martin Gallo, Core Security.
+:copyright: (c) 2015 by Martin Gallo, SecureAuth Corporation.
 :license: GNU General Public License v2 or later (GPLv2+)
 
 """
@@ -36,7 +36,7 @@ __version__ = '0.1.1'
 __url__ = "http://corelabs.coresecurity.com/index.php?module=Wiki&action=view&type=tool&name=honeysap"
 """The URL for honeysap's homepage"""
 
-__repo__ = "https://github.com/CoreSecurity/honeysap"
+__repo__ = "https://github.com/SecureAuthCorp/honeysap"
 """The URL for honeysap's repository"""
 
 __license__ = "GNU General Public License v2 or later (GPLv2+)"

@@ -6,7 +6,7 @@ Installation
 This section of the documentation covers the installation process of HoneySAP.
 The first step to using it is getting it properly installed on the system.
 
-The following are some basic instructions about how to install HoneySAP on different environments. 
+The following are some basic instructions about how to install HoneySAP on different environments.
 
 
 Using pip
@@ -27,7 +27,7 @@ First step would be to install system packages that are required::
 After having all the system packages ready, you can proceed to install HoneySAP::
 
    cd /opt
-   git clone https://github.com/CoreSecurity/honeysap
+   git clone https://github.com/SecureAuthCorp/honeysap
    cd honeysap
    sudo python setup.py install
 
@@ -39,5 +39,3 @@ that need to be installed manually::
 The honeypot is then ready for being run::
 
    /usr/local/bin/honesap --config-file /opt/honeysap/honeysap.yml
-
-
