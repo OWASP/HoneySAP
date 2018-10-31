@@ -1,0 +1,19 @@
+# Travis configuration
+
+language: python
+
+dist: trusty
+sudo: false
+
+
+install:
+  - pip2 install .
+  - pip2 install -r requirements-optional.txt
+
+script:
+  - python setup.py test
+
+before_deploy:
+  # Build a source and wheel artifact
+  - python setup.py sdist
+  - python setup.py bdist_wheel
