@@ -1,6 +1,8 @@
 HoneySAP: SAP Low-interaction honeypot
 ======================================
 
+[![Build Status](https://travis-ci.org/SecureAuthCorp/HoneySAP.svg?branch=master)](https://travis-ci.org/SecureAuthCorp/HoneySAP)
+
 Copyright (C) 2015 by Martin Gallo, SecureAuth Corporation
 
 The tool was designed and developed by Martin Gallo from the SecureAuth Corporation's Labs team.
@@ -37,19 +39,19 @@ To install HoneySAP, simply download the sources and run:
 A more complete guidance on how to install HoneySAP on different environments
 is provided in the documentation.
 
-### Installation with pip ###
-
-Installing honeysap is simple with [pip](https://pip.pypa.io/), just run the
-following command on a terminal:
-
-    $ pip install honeysap
-
 
 License
 -------
 
 This tool is distributed under the GPLv2 license. Check the `COPYING` file for
 more details.
+
+
+Authors
+-------
+
+The tool was designed and developed by Martin Gallo from SecureAuth
+Corporation's SecureAuth Labs team.
 
 
 Contact
