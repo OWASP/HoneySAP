@@ -3,5 +3,5 @@ flask==0.12.4
 gevent==1.0.2
 SQLAlchemy==1.0.9
 PyYAML==3.13
-colorlog==2.6.0
+colorlog==3.1.4
 jsoncomment==0.3.0
