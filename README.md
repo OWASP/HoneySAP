@@ -5,7 +5,7 @@ Copyright (C) 2015 by Martin Gallo, SecureAuth Corporation
 
 The tool was designed and developed by Martin Gallo from the SecureAuth Corporation's Labs team.
 
-Version 0.1.1.dev0 (XXX 2015)
+Version 0.1.2.dev0 (XXX 2018)
 
 
 Overview

@@ -30,10 +30,10 @@ against SAP systems.
 
 """
 
-__version__ = '0.1.1'
+__version__ = '0.1.2.dev0'
 """The version of honeysap"""
 
-__url__ = "http://corelabs.coresecurity.com/index.php?module=Wiki&action=view&type=tool&name=honeysap"
+__url__ = "https://www.secureauth.com/labs/open-source-tools"
 """The URL for honeysap's homepage"""
 
 __repo__ = "https://github.com/SecureAuthCorp/honeysap"
