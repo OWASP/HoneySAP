@@ -1,0 +1,42 @@
+<html><head><title>Application Server Error</title>
+<style type="text/css">
+body { font-family: arial, sans-serif;}
+</style>
+</head>
+<BODY text="#172972" link="#808080" vlink="#808080"
+alink="#8e236b" bgcolor=white  leftmargin="0" topmargin="0"
+marginheight="0" marginwidth="0">
+<table height="61" width="100%" border="0" cellspacing="0"
+cellpadding="0"><tr><td background="{{ base_url }}/sap/public/icman/img/bluebar_tile.gif"
+height="30"><table> <tr> <td width=5></td> <td width=20% nowrap><font face=arial size="-1" color=white>SAP NetWeaver Application Server
+</font></td><td width=75% align="right" nowrap><font face=arial
+size="-1" color="white"><a href="http://help.sap.com/">Help
+</font></td><td width=5% nowrap></font></td> </tr></table>
+</td><td rowspan=2 width=122 height=61 valign=top><img src=
+"{{ base_url }}/sap/public/icman/img/theme.jpg" width=122 height=61 border=0 alt="SAP"></td>
+</tr><tr><td background="{{ base_url }}/sap/public/icman/img/graybar_tile.jpg" height="31">
+&nbsp;</td></tr>
+</table>
+<br><br>
+<table width=800>
+<tr><td width=50 nowrap>
+</td><td>
+<H2><b>400 Bad HTTP request </b></H2><br>Bad HTTP request<br><br><hr>
+<table border="0">
+<tr><td>Error:</td><td>{{ error }}</td></tr>
+<tr><td>Version:</td><td>{{ version }}</td></tr>
+<tr><td>Component:</td><td>HTTP_PLG</td></tr>
+<tr><td>Date/Time:</td><td>{{ date_time }}
+</td></tr>
+<tr><td>Module:</td><td>http_plg.c</td></tr>
+<tr><td>Line:</td><td>5628</td></tr>
+<tr><td>Server:</td><td>{{ server }}</td></tr>
+<tr><td>Error Tag:</td><td>{000d09e1}</td></tr>
+<tr><td>Detail:</td><td>illegal request version</td></tr>
+</table>
+<p></p>
+</td></tr></table>
+<table><tr><td width=50 nowrap></td>
+<td nowrap><FONT SIZE=-1><a href="http://www.sap.com/">&copy; 2001-2009, SAP AG</a></FONT>
+</td></tr></table>
+</body></html>
