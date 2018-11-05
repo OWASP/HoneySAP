@@ -14,7 +14,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   # VM for running the actual HoneySAP
   config.vm.define "honeysap" do |honeysap|
 
-    honeysap.vm.box = "ubuntu/trusty64"
+    honeysap.vm.box = "ubuntu/bionic64"
 
     # Set the private network
     honeysap.vm.network "private_network", ip: "10.250.250.10"
@@ -33,7 +33,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   # VM for running the HPFeeds broker
   config.vm.define "broker" do |broker|
 
-    broker.vm.box = "ubuntu/trusty64"
+    broker.vm.box = "ubuntu/bionic64"
 
     # Set the private network
     broker.vm.network "private_network", ip: "10.250.250.20"
@@ -50,7 +50,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
   # VM for running an ELK stack
   config.vm.define "honeysapelk" do |honeysapelk|
 
-    honeysapelk.vm.box = "ubuntu/trusty64"
+    honeysapelk.vm.box = "ubuntu/bionic64"
 
     # Set the private network
     honeysapelk.vm.network "private_network", ip: "10.250.250.30"

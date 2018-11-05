@@ -1,6 +1,6 @@
 # HoneySAP Dockerfile for running HoneySAP
 
-FROM ubuntu:14.04
+FROM ubuntu:18.04
 
 MANTAINER mgallo@secureauth.com
 
