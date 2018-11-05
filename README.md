@@ -2,6 +2,7 @@ HoneySAP: SAP Low-interaction honeypot
 ======================================
 
 [![Build Status](https://travis-ci.org/SecureAuthCorp/HoneySAP.svg?branch=master)](https://travis-ci.org/SecureAuthCorp/HoneySAP)
+[![Code Health](https://landscape.io/github/SecureAuthCorp/HoneySAP/master/landscape.svg)](https://landscape.io/github/SecureAuthCorp/HoneySAP/master)
 
 Copyright (C) 2015 by Martin Gallo, SecureAuth Corporation
 

@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Install extra python packages
-RUN pip install "git+https://github.com/rep/hpfeeds.git#egg=hpfeeds"
+RUN pip install -r requirements-optional.txt
 
 WORKDIR /opt/honeysap
 VOLUME /opt/honeysap
