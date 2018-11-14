@@ -13,16 +13,16 @@ RUN apt-get update && apt-get install -y \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Install extra python packages
-RUN pip install -r requirements-optional.txt
-
+COPY . /opt/honeysap
 WORKDIR /opt/honeysap
-VOLUME /opt/honeysap
 
 # Clone git repo and install HoneySAP
 RUN cd /opt/honeysap && \
     python setup.py install && \
     rm -rf /tmp/* /var/tmp/*
+
+# Install extra python packages
+RUN pip install -r requirements-optional.txt
 
 EXPOSE 3299 8001
 
