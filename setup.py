@@ -22,7 +22,7 @@
 # Standard imports
 from sys import exit
 from os import system
-from setuptools import setup, find_packages
+from setuptools import setup, find_packages, Command
 # Custom imports
 import honeysap
 
