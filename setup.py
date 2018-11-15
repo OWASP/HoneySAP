@@ -20,9 +20,30 @@
 # ==============
 
 # Standard imports
-from setuptools import setup, find_packages
+from sys import exit
+from os import system
+from setuptools import setup, find_packages, Command
 # Custom imports
 import honeysap
+
+
+class DocumentationCommand(Command):
+    """Custom command for building the documentation with Sphinx.
+    """
+
+    description = "Builds the documentation using Sphinx"
+    user_options = []
+
+    def initialize_options(self):
+        pass
+
+    def finalize_options(self):
+        pass
+
+    def run(self):
+        """Runs Sphinx
+        """
+        exit(system("cd docs && make html"))
 
 
 setup(name=honeysap.__name__,   # Package information
@@ -52,7 +73,13 @@ setup(name=honeysap.__name__,   # Package information
       # Tests command
       test_suite='tests.test_suite',
 
+      # Documentation commands
+      cmdclass={'doc': DocumentationCommand},
+
       # Requirements
       install_requires=open('requirements.txt').read().splitlines(),
       dependency_links=["git+https://github.com/rep/hpfeeds.git#egg=hpfeeds"],
+
+      # Optional requirements for docs
+      extras_require={"docs": open('requirements-docs.txt').read().splitlines()}
       )

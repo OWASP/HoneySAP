@@ -14,6 +14,7 @@ env:
 install:
   - pip2 install .
   - pip2 install flake8
+  - pip2 install -r requirements-docs.txt
   - pip2 install -r requirements-optional.txt
 
 before_script:
@@ -25,6 +26,7 @@ before_script:
 
 script:
   - python setup.py test
+  - python setup.py doc
   - docker images ${DOCKER_TAG}
 
 after_script:
