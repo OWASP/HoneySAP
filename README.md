@@ -4,11 +4,9 @@ HoneySAP: SAP Low-interaction honeypot
 [![Build Status](https://travis-ci.org/SecureAuthCorp/HoneySAP.svg?branch=master)](https://travis-ci.org/SecureAuthCorp/HoneySAP)
 [![Code Health](https://landscape.io/github/SecureAuthCorp/HoneySAP/master/landscape.svg)](https://landscape.io/github/SecureAuthCorp/HoneySAP/master)
 
-Copyright (C) 2015 by Martin Gallo, SecureAuth Corporation
+SECUREAUTH LABS. Copyright (C) 2019 SecureAuth Corporation. All rights reserved.
 
-The tool was designed and developed by Martin Gallo from the SecureAuth Corporation's Labs team.
-
-Version 0.1.2.dev0 (XXX 2018)
+Version 0.1.2.dev0 (XXX 2019)
 
 
 Overview
@@ -51,8 +49,7 @@ more details.
 Authors
 -------
 
-The tool was designed and developed by Martin Gallo from SecureAuth
-Corporation's SecureAuth Labs team.
+The tool was designed and developed by Martin Gallo from SecureAuth Labs team.
 
 
 Contact
