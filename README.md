@@ -39,6 +39,12 @@ A more complete guidance on how to install HoneySAP on different environments
 is provided in the documentation.
 
 
+Documentation
+-------------
+
+Documentation is available at [Read the Docs](https://honeysap.readthedocs.io/en/latest/).
+
+
 License
 -------
 
