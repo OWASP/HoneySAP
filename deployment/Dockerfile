@@ -9,7 +9,8 @@ RUN apt-get update && apt-get install -y \
         git \
         python-pip \
         python-dev \
-        build-essential && \
+        build-essential \
+        python-yaml && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
