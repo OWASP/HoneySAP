@@ -1,0 +1,112 @@
+# GitHub Action workflow to build and test HoneySAP
+#
+
+name: Build and test HoneySAP
+
+on: [push, pull_request]
+
+jobs:
+  health:
+    name: Check code health
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [2.7]
+    steps:
+      - name: Checkout HoneySAP
+        uses: actions/checkout@v2
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          python2 -m pip install --upgrade pip wheel
+          pip install flake8 six
+          pip install -r requirements.txt
+      - name: Run flake8 tests
+        run: |
+          flake8 . --count --select=E901,E999,F821,F822,F823 --show-source --statistics
+          flake8 . --count --ignore=E501 --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+  test:
+    name: Run unit tests and build wheel
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [2.7]
+    steps:
+      - name: Checkout HoneySAP
+        uses: actions/checkout@v2
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Python dependencies
+        run: |
+          python2 -m pip install --upgrade pip wheel
+          pip install -r requirements.txt
+          pip install -r requirements-optional.txt
+      - name: Run unit tests
+        run: |
+          python setup.py test
+      - name: Build source artifact
+        run: |
+          python setup.py sdist
+      - name: Build wheel artifact
+        run: |
+          python setup.py bdist_wheel
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: packages
+          path: dist/*.whl
+
+  docs:
+    name: Build documentation and source package
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [2.7]
+    steps:
+      - name: Checkout HoneySAP
+        uses: actions/checkout@v2
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get install pandoc texlive-latex-base
+      - name: Install Python dependencies
+        run: |
+          python2 -m pip install --upgrade pip wheel
+          pip install -r requirements-docs.txt
+      - name: Install the library
+        run: |
+          python2 setup.py install
+      - name: Build documentation
+        run: |
+          python2 setup.py doc
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: [test, docs]
+    env:
+       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'v') }}
+    steps:
+       - name: Download artifacts
+         uses: actions/download-artifact@v2
+         with:
+            name: packages
+            path: dist
+       - name: Create release and upload assets
+         uses: meeDamian/github-release@2.0
+         with:
+            token: ${{ secrets.GITHUB_TOKEN }}
+            name: HoneySAP ${{ github.ref }}
+            draft: true
+            files: dist/
+            gzip: folders

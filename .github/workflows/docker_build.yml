@@ -1,0 +1,17 @@
+# GitHub Action workflow to build and test HoneySAP
+#
+
+name: Build and test HoneySAP
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    name: Build docker image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout HoneySAP
+        uses: actions/checkout@v2
+      - name: Builds docker image
+        run: |
+          docker build -t ${DOCKER_TAG} -f deployment/Dockerfile .
