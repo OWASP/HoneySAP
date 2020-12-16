@@ -3,7 +3,7 @@
 Development
 ===========
 
-The project is work in progress and under active development, contributions are
+The project is work in progress but not under active development, contributions are
 more than welcome.
 
 - Check for open issues or open a new issue to start a discussion about

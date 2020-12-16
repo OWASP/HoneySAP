@@ -65,7 +65,8 @@ proper SDLC process.
 Authors
 -------
 
-The tool was designed and developed by Martin Gallo from SecureAuth Labs team.
+The tool was designed and developed by Martin Gallo from [SecureAuth's Innovation
+Labs](https://www.secureauth.com/labs/) team, with the help of many contributors.
 
 
 Contact
