@@ -1,7 +1,8 @@
 HoneySAP: SAP Low-interaction honeypot
 ======================================
 
-[![Build Status](https://travis-ci.org/SecureAuthCorp/HoneySAP.svg?branch=master)](https://travis-ci.org/SecureAuthCorp/HoneySAP)
+[![Build and test HoneySAP](https://github.com/SecureAuthCorp/HoneySAP/actions/workflows/build_and_test.yml/badge.svg)](https://github.com/SecureAuthCorp/HoneySAP/actions/workflows/build_and_test.yml)
+[![Documentation Status](https://readthedocs.org/projects/honeysap/badge/?version=latest)](https://honeysap.readthedocs.io/en/latest/?badge=latest)
 
 SECUREAUTH LABS. Copyright (C) 2021 SecureAuth Corporation. All rights reserved.
 
