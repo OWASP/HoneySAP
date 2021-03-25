@@ -1,9 +1,12 @@
-# GitHub Action workflow to build and test HoneySAP
+# GitHub Action workflow to build the HoneySAP docker image
 #
 
-name: Build and test HoneySAP
+name: Build HoneySAP docker image
 
 on: [push, pull_request]
+
+env:
+   DOCKER_TAG: honeysap:development
 
 jobs:
   test:
