@@ -4,4 +4,3 @@ branch = True
 
 [report]
 source = honeysap/
-omit = honeysap/test/
