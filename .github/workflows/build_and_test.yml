@@ -46,7 +46,6 @@ jobs:
         run: |
           python2 -m pip install --upgrade pip wheel
           pip install -r requirements.txt
-          pip install -r requirements-optional.txt
       - name: Run unit tests
         run: |
           python setup.py test

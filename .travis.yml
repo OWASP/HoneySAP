@@ -16,7 +16,6 @@ install:
   - pip2 install .
   - pip2 install flake8
   - pip2 install -r requirements-docs.txt
-  - pip2 install -r requirements-optional.txt
 
 before_script:
   # stop the build if there are Python syntax errors or undefined names

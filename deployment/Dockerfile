@@ -22,9 +22,6 @@ RUN cd /opt/honeysap && \
     python setup.py install && \
     rm -rf /tmp/* /var/tmp/*
 
-# Install extra python packages
-RUN pip install -r requirements-optional.txt
-
 EXPOSE 3299 8001
 
 CMD ["/usr/local/bin/honeysap", "--config-file", "honeysap.yml"]
