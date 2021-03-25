@@ -6,3 +6,4 @@ PyYAML==4.2b4
 colorlog==3.1.4
 jsoncomment==0.3.0
 Jinja2<3.0.0
+hpfeeds==3.0.0

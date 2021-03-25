@@ -78,7 +78,6 @@ setup(name=honeysap.__name__,   # Package information
 
       # Requirements
       install_requires=open('requirements.txt').read().splitlines(),
-      dependency_links=["git+https://github.com/rep/hpfeeds.git#egg=hpfeeds"],
 
       # Optional requirements for docs
       extras_require={"docs": open('requirements-docs.txt').read().splitlines()}
