@@ -12,12 +12,12 @@ The following are some basic instructions about how to install HoneySAP on diffe
 Using pip
 ---------
 
-Installing honeysap is simple with pip, just run the following command on a terminal::
+Installing honeysap is simple with pip, after checking out the code, just run the following command on a terminal::
 
-    pip install honeysap
+    pip install .
 
 
-Ubuntu 14.04
+Ubuntu 18.04
 ------------
 
 First step would be to install system packages that are required::
@@ -30,11 +30,6 @@ After having all the system packages ready, you can proceed to install HoneySAP:
    git clone https://github.com/SecureAuthCorp/honeysap
    cd honeysap
    sudo python setup.py install
-
-The setup should take care of all python packages that are required, with only one exception
-that need to be installed manually::
-
-   sudo pip install "git+https://github.com/rep/hpfeeds.git#egg=hpfeeds"
 
 The honeypot is then ready for being run::
 
