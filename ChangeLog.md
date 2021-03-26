@@ -5,6 +5,7 @@ v0.1.2 - 2021-XX-XX
 -------------------
 
 - Bumped requirements libraries.
+- Using Sphinx 1.8.5 for documentation.
 - Added GitHub actions to run unit tests.
 - Added Docker, Vagrant and Ansible-based deployments.
 - Added example internal and external profile configuration files.
