@@ -37,11 +37,12 @@ replaces by the content of the included  ``json`` file:
 
 .. code-block:: json
 
-   {"Some key": "Some value",
-    "Some nested key": {
-      "__include__": "path_to_the_file_to_include.json"
+    {
+       "Some key":"Some value",
+       "Some nested key":{
+          "__include__":"path_to_the_file_to_include.json"
+       }
     }
-   }
 
 ``YAML``:
 
@@ -65,15 +66,16 @@ the configuration.
 You can use one-line comments by starting a line with the ``#`` character, or
 multi-line comments by using JavaScript notation ``/* comment */``:
 
-.. code-block:: json
+.. code-block:: text
 
-   {"Some key": "Some value",
-    # Here comes a one-line comment
-    "Some nested key": {
-      /* A multi-line comment
-         this way */
-      "Another key": "Another value"
-    }
+   {
+       "Some key": "Some value",
+       # Here comes a one-line comment
+       "Some nested key": {
+          /* A multi-line comment
+             this way */
+          "Another key": "Another value"
+       }
    }
 
 ``YAML``:

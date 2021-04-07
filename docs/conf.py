@@ -42,6 +42,7 @@ master_doc = 'index'
 # General information about the project.
 project = u'HoneySAP'
 copyright = u'SECUREAUTH LABS. Copyright (C) 2021 SecureAuth Corporation. All rights reserved.'
+author = u'Martin Gallo, SecureAuth Corporation'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -91,7 +92,7 @@ pygments_style = 'sphinx'
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
-html_theme = 'default'
+html_theme = 'alabaster'
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -184,7 +185,7 @@ latex_elements = {
 # (source start file, target name, title, author, documentclass [howto/manual]).
 latex_documents = [
   ('index', 'HoneySAP.tex', u'HoneySAP Documentation',
-   u'Martin Gallo, SecureAuth Corporation', 'manual'),
+   author, 'manual'),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of
@@ -214,7 +215,7 @@ latex_documents = [
 # (source start file, name, description, authors, manual section).
 man_pages = [
     ('index', 'honeysap', u'HoneySAP Documentation',
-     [u'Martin Gallo, SecureAuth Corporation'], 1)
+     [author], 1)
 ]
 
 # If true, show URL addresses after external links.
@@ -227,8 +228,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-  ('index', 'HoneySAP', u'HoneySAP Documentation',
-   u'Martin Gallo, SecureAuth Corporation', 'HoneySAP', 'Low interaction honeypot for SAP services.',
+  ('index', project, u'HoneySAP Documentation',
+   author, project, 'Low interaction honeypot for SAP services.',
    'Miscellaneous'),
 ]
 
@@ -245,10 +246,10 @@ texinfo_documents = [
 # -- Options for Epub output ---------------------------------------------------
 
 # Bibliographic Dublin Core info.
-epub_title = u'HoneySAP'
-epub_author = u'Martin Gallo'
-epub_publisher = u'Martin Gallo'
-epub_copyright = u'SECUREAUTH LABS. Copyright (C) 2021 SecureAuth Corporation. All rights reserved.'
+epub_title = project
+epub_author = author
+epub_publisher = author
+epub_copyright = copyright
 
 # The language of the text. It defaults to the language option
 # or en if the language is not set.
