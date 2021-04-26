@@ -1,4 +1,4 @@
-pysap==0.1.8
+pysap==0.1.18
 flask==1.0
 gevent==1.0.2
 SQLAlchemy==1.3.0
