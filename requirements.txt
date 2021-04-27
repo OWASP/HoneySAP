@@ -1,9 +1,9 @@
 pysap==0.1.18
 flask==1.0
 gevent==1.0.2
-SQLAlchemy==1.3.0
-PyYAML==5.4
-colorlog==3.1.4
-jsoncomment==0.3.0
+SQLAlchemy==1.4.11
+PyYAML==5.4.1
+colorlog<6
+jsoncomment==0.3.3
 Jinja2<3.0.0
 hpfeeds==3.0.0
