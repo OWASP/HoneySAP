@@ -123,7 +123,7 @@ class FeedManager(Loggeable):
                     # the feeds
                     try:
                         feed.log(event)
-                    except Exception:
+                    except Exception as e:
                         self.logger.exception("Feed failed at processing event '%s'" % event)
             except Empty:
                 pass
@@ -146,7 +146,7 @@ class FeedManager(Loggeable):
                 # Try to run the callback for producing the eater output
                 try:
                     callback(event)
-                except Exception:
+                except Exception as e:
                     self.logger.exception("Eater failed at processing event '%s'" % event)
 
             except Empty:

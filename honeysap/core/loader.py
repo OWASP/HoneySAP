@@ -54,7 +54,7 @@ class ClassLoader(Loggeable):
             for class_name, actual_class in getmembers(class_module, self.is_subclass):
 
                 self.logger.debug("Found class %s in module %s", class_name, class_modulename)
-                yield (class_name, actual_class)
+                yield class_name, actual_class
 
     def find(self, class_name):
         for (class_name_found, actual_class) in self.load():

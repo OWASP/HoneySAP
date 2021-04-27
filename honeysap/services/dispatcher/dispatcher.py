@@ -93,8 +93,6 @@ class SAPDispatcherServerHandler(Loggeable, SAPNIServerHandler):
         """Handles a received packet"""
         self.session.add_event("Received packet", request=str(self.packet))
 
-        print self.server, self.server.clients
-
         if self.client_address in self.server.clients and self.server.clients[self.client_address].init:
             self.logger.debug("Already initialized client %s" % str(self.client_address))
             self.handle_msg()

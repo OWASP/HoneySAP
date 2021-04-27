@@ -63,7 +63,7 @@ class HoneySAPEater(Loggeable):
                                  help="if the console should print logs for all namespaces (root logger) [default: %default]")
         parser.add_option_group(logging_group)
 
-        (self.config, __) = parser.parse_args(self.argv)
+        self.config, __ = parser.parse_args(self.argv)
 
     def setup_logger(self):
         """Setup logging options, adding the configured handlers (console and
@@ -106,7 +106,8 @@ class HoneySAPEater(Loggeable):
                 self.outputs.append(sys.stdout)
             elif eater_type == "file":
                 filename = self.config.get("eater_filename", "honeysapeater.log")
-                self.outputs.append(file(filename, "a"))
+                with open(filename, "a") as fd:
+                    self.outputs.append(fd)
 
     def run(self):
         """Launch the configured and enabled services"""

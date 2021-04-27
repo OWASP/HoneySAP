@@ -109,22 +109,22 @@ class ConfigurationTest(unittest.TestCase):
 
         # Test using a file with random content
         config = Configuration()
-        with file(test_filename, 'w') as f:
-            f.write("junk: %lalala%")
+        with open(test_filename, 'w') as fd:
+            fd.write("junk: %lalala%")
         with self.assertRaises(ConfigurationParserNotFound):
             config.update(test_filename, from_file=True)
 
         # Test using valid json
         config = Configuration()
-        with file(test_filename, 'w') as f:
-            json.dump({self.key: self.value}, f)
+        with open(test_filename, 'w') as fd:
+            json.dump({self.key: self.value}, fd)
         config.update(test_filename, from_file=True)
         self.assertEqual(self.value, config.get(self.key))
 
         # Test using json with comments
         config = Configuration()
-        with file(test_filename, 'w') as f:
-            f.write("""{
+        with open(test_filename, 'w') as fd:
+            fd.write("""{
             # Some one-line comment
             %s: %s,
             /* Other multi-line
@@ -135,8 +135,8 @@ class ConfigurationTest(unittest.TestCase):
 
         # Test using valid yaml
         config = Configuration()
-        with file(test_filename, 'w') as f:
-            yaml.dump({self.key: self.value}, f)
+        with open(test_filename, 'w') as fd:
+            yaml.dump({self.key: self.value}, fd)
         config.update(test_filename, from_file=True)
         self.assertEqual(self.value, config.get(self.key))
 
@@ -148,14 +148,14 @@ class ConfigurationTest(unittest.TestCase):
         test_filename = mkstemp()[1]
         test_filename_include = mkstemp()[1]
 
-        with file(test_filename, 'w') as f:
-            f.write("""---
+        with open(test_filename, 'w') as fd:
+            fd.write("""---
             %s: %s
             %s: !include %s""" % (self.key, self.value,
                                   self.new_key, test_filename_include))
 
-        with file(test_filename_include, 'w') as f:
-            yaml.dump({self.new_new_key: self.new_new_value}, f)
+        with open(test_filename_include, 'w') as fd:
+            yaml.dump({self.new_new_key: self.new_new_value}, fd)
 
         config = Configuration()
         config.update(test_filename, from_file=True)
@@ -175,15 +175,15 @@ class ConfigurationTest(unittest.TestCase):
         test_filename = mkstemp()[1]
         test_filename_include = mkstemp()[1]
 
-        with file(test_filename, 'w') as f:
-            f.write("""{
+        with open(test_filename, 'w') as fd:
+            fd.write("""{
             "%s": "%s",
             "%s": { "!include": "%s" }
             }""" % (self.key, self.value, self.new_key,
                     test_filename_include))
 
-        with file(test_filename_include, 'w') as f:
-            json.dump({self.new_new_key: self.new_new_value}, f)
+        with open(test_filename_include, 'w') as fd:
+            json.dump({self.new_new_key: self.new_new_value}, fd)
 
         config = Configuration()
         config.update(test_filename, from_file=True)

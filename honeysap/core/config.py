@@ -24,6 +24,8 @@ from pprint import pformat
 from os.path import isfile
 from abc import abstractmethod, ABCMeta
 from optparse import OptionParser, Values
+# External imports
+from six import string_types
 # Optional imports
 try:
     from yaml import Loader as yaml_loader, load as yaml_load
@@ -73,7 +75,7 @@ class ConfigurationJSONParser(ConfigurationFileParser):
             return parser.parse_file(inp[self.include_string])
 
         if isinstance(inp, dict):
-            return {self.object_hook(key): self.object_hook(value) for key, value in inp.iteritems()}
+            return {self.object_hook(key): self.object_hook(value) for key, value in inp.items()}
         elif isinstance(inp, list):
             return [self.object_hook(element) for element in inp]
         elif isinstance(inp, unicode):
@@ -134,7 +136,7 @@ class ConfigurationYAMLParser(ConfigurationFileParser):
         try:
             with open(config_file, 'r') as f:
                 ConfigurationYAMLLoader(f).get_single_data()
-        except:
+        except Exception as e:
             return False
         return True
 
@@ -180,7 +182,7 @@ class Configuration(Values):
             fnc = self._update_loose
 
         if from_file is True:
-            if isinstance(obj, (basestring, unicode, )) and isfile(obj):
+            if isinstance(obj, (string_types, unicode, )) and isfile(obj):
                 valid_parser = None
                 for parser in self._options_parsers:
                     if parser.check_file(obj):
@@ -258,4 +260,4 @@ class ConfigurationParserFromFile(OptionParser):
         if configuration.config_file:
             configuration.update(configuration.config_file, from_file=True)
 
-        return (configuration, args)
+        return configuration, args

@@ -7,3 +7,4 @@ colorlog<6
 jsoncomment==0.3.3
 Jinja2<3.0.0
 hpfeeds==3.0.0
+six

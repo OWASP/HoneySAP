@@ -20,7 +20,8 @@
 # Standard imports
 
 # External imports
-
+from six import string_types
+from six.moves import range
 # Custom imports
 from honeysap.core.logger import Loggeable
 # Optional imports
@@ -55,7 +56,7 @@ class RouteTable(Loggeable):
         """Parses a route table entry.
         """
         # Parse the route as a string
-        if isinstance(entry, (basestring, unicode)):
+        if isinstance(entry, (string_types, unicode)):
             try:
                 action, talk_mode, target, port, password = entry.split(",", 5)
             except ValueError:
@@ -91,19 +92,19 @@ class RouteTable(Loggeable):
         except (AttributeError, ValueError):
             begin, end = ports, ports
 
-        return xrange(int(begin), int(end) + 1)
+        return range(int(begin), int(end) + 1)
 
     def parse_target_hosts(self, hosts, port):
         """Parses a list of hosts"""
         if netaddr:
             if netaddr.valid_nmap_range(hosts):
                 for ip in netaddr.iter_nmap_range(hosts):
-                    yield (str(ip), port)
+                    yield str(ip), port
             else:
                 for ip in netaddr.iter_unique_ips(hosts):
-                    yield (str(ip), port)
+                    yield str(ip), port
         else:
-            yield (hosts, port)
+            yield hosts, port
 
     def build_table(self, route_table):
         """Builds an internal structure for performing lookups on the
@@ -141,4 +142,4 @@ class RouteTable(Loggeable):
             return self.table[(host, port)]
 
         # Denies the connections by default if no matches on the table
-        return (self.ROUTE_DENY, self.MODE_ANY, None)
+        return self.ROUTE_DENY, self.MODE_ANY, None

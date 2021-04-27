@@ -20,7 +20,7 @@
 # Standard imports
 import unittest
 # External imports
-
+from six.moves import range
 # Custom imports
 from honeysap.services.saprouter.routetable import RouteTable
 
@@ -90,7 +90,7 @@ class RouteTableTest(unittest.TestCase):
         table = ["allow,ni,10.0.0.1,3200-3209,"]
         routetable = RouteTable(table)
 
-        for port in xrange(3200, 3209):
+        for port in range(3200, 3209):
             self.assertIn(("10.0.0.1", port), routetable.table)
             self.assertEqual((RouteTable.ROUTE_ALLOW,
                               RouteTable.MODE_NI,

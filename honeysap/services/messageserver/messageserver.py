@@ -168,7 +168,7 @@ class SAPMSHTTPServerHandler(Loggeable, BaseHTTPRequestHandler):
 
         try:
             may_version, min_version = map(int, self.request_version.split("/", 2)[1].split(".", 2))
-        except:
+        except Exception as e:
             may_version, min_version = 1, 1
 
         http_version = "HTTP/%d.%d" % (may_version, min_version)
