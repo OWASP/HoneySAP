@@ -48,19 +48,8 @@ Documentation is available at [Read the Docs](https://honeysap.readthedocs.io/en
 License
 -------
 
-This tool is distributed under the GPLv2 license. Check the `COPYING` file for
-more details.
-
-
-Disclaimer
-----------
-
-The spirit of this open source initiative is hopefully to help the community to
-alleviate some of the hindrances associated with the implementation of
-networking protocols and stacks, aiming at speeding up research and educational
-activities. By no means this package is meant to be used in production
-environments / commercial products. If so, we would advise to include it into a
-proper SDLC process.
+This tool is distributed under the GPLv2 license. Check the [COPYING](COPYING)
+file for more details.
 
 
 Authors
@@ -69,10 +58,27 @@ Authors
 The tool was designed and developed by Martin Gallo from [SecureAuth's Innovation
 Labs](https://www.secureauth.com/labs/) team, with the help of many contributors.
 
+Disclaimer
+----------
 
-Contact
--------
+The spirit of this Open Source initiative is to help security researchers,
+and the community, speed up research and educational activities related to
+the implementation of networking protocols and stacks.
 
-Whether you want to report a bug or give some suggestions on this package, drop
-us a few lines at `oss@secureauth.com` or contact the author email
-`mgallo@secureauth.com`.
+The information in this repository is for research and educational purposes
+and not meant to be used in production environments and/or as part
+of commercial products.
+
+If you desire to use this code or some part of it for your own uses, we
+recommend applying proper security development life cycle and secure coding
+practices, as well as generate and track the respective indicators of
+compromise according to your needs.
+
+
+Contact Us
+----------
+
+Whether you want to report a bug, send a patch, or give some suggestions
+on this package, drop us a few lines at oss@secureauth.com.
+
+For security-related questions check our [security policy](SECURITY.md).
