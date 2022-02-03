@@ -41,7 +41,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'HoneySAP'
-copyright = u'SECUREAUTH LABS. Copyright (C) 2021 SecureAuth Corporation. All rights reserved.'
+copyright = u'SECUREAUTH LABS. Copyright (C) 2022 SecureAuth Corporation. All rights reserved.'
 author = u'Martin Gallo, SecureAuth Corporation'
 
 # The version info for the project you're documenting, acts as replacement for

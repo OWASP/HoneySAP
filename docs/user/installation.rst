@@ -14,7 +14,7 @@ Using pip
 
 Installing honeysap is simple with pip, after checking out the code, just run the following command on a terminal::
 
-    pip install .
+    python -m pip install .
 
 
 Ubuntu 18.04
@@ -22,15 +22,15 @@ Ubuntu 18.04
 
 First step would be to install system packages that are required::
 
-   sudo apt-get update && sudo apt-get install git python-pip python-dev build-essentials
+   sudo apt-get update && sudo apt-get install git python-pip python-dev build-essential
 
 After having all the system packages ready, you can proceed to install HoneySAP::
 
    cd /opt
    git clone https://github.com/SecureAuthCorp/honeysap
    cd honeysap
-   sudo python setup.py install
+   sudo python -m pip install .
 
 The honeypot is then ready for being run::
 
-   /usr/local/bin/honesap --config-file /opt/honeysap/honeysap.yml
+   /usr/local/bin/honeysap --config-file /opt/honeysap/honeysap.yml

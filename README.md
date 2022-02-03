@@ -4,9 +4,9 @@ HoneySAP: SAP Low-interaction honeypot
 [![Build and test HoneySAP](https://github.com/SecureAuthCorp/HoneySAP/actions/workflows/build_and_test.yml/badge.svg)](https://github.com/SecureAuthCorp/HoneySAP/actions/workflows/build_and_test.yml)
 [![Documentation Status](https://readthedocs.org/projects/honeysap/badge/?version=latest)](https://honeysap.readthedocs.io/en/latest/?badge=latest)
 
-SECUREAUTH LABS. Copyright (C) 2021 SecureAuth Corporation. All rights reserved.
+SECUREAUTH LABS. Copyright (C) 2022 SecureAuth Corporation. All rights reserved.
 
-Version 0.1.2.dev0 (XXX 2021)
+Version 0.1.2.dev0 (XXX 2022)
 
 
 Overview
@@ -33,7 +33,7 @@ Installation
 
 To install HoneySAP, simply download the sources and run:
 
-    $ python setup.py install
+    $ python -m pip install .
 
 A more complete guidance on how to install HoneySAP on different environments
 is provided in the documentation.

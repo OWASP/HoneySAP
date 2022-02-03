@@ -22,8 +22,8 @@ jobs:
       - name: Install dependencies
         run: |
           python2 -m pip install --upgrade pip wheel
-          pip install flake8 six
-          pip install -r requirements.txt
+          python2 -m pip install flake8 six
+          python2 -m pip install -r requirements.txt
       - name: Run flake8 tests
         run: |
           flake8 . --count --select=E901,E999,F821,F822,F823 --show-source --statistics
@@ -46,7 +46,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python2 -m pip install --upgrade pip wheel
-          pip install -r requirements.txt
+          python2 -m pip install -r requirements.txt
       - name: Run unit tests
         run: |
           python setup.py test
@@ -81,7 +81,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python2 -m pip install --upgrade pip wheel
-          pip install -r requirements-docs.txt
+          python2 -m pip install -r requirements-docs.txt
       - name: Install the library
         run: |
           python2 setup.py install

@@ -19,7 +19,7 @@ WORKDIR /opt/honeysap
 
 # Clone git repo and install HoneySAP
 RUN cd /opt/honeysap && \
-    python setup.py install && \
+    python -m pip install . && \
     rm -rf /tmp/* /var/tmp/*
 
 EXPOSE 3299 8001
