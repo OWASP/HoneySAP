@@ -2,7 +2,7 @@
 
 FROM ubuntu:18.04
 
-MAINTAINER mgallo@secureauth.com
+MAINTAINER martin.gallo@gmail.com
 
 # Install system packages
 RUN apt-get update && apt-get install -y \

@@ -41,8 +41,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'HoneySAP'
-copyright = u'SECUREAUTH LABS. Copyright (C) 2022 SecureAuth Corporation. All rights reserved.'
-author = u'Martin Gallo, SecureAuth Corporation'
+author = u'Martin Gallo, OWASP CBAS Project'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -249,7 +248,6 @@ texinfo_documents = [
 epub_title = project
 epub_author = author
 epub_publisher = author
-epub_copyright = copyright
 
 # The language of the text. It defaults to the language option
 # or en if the language is not set.

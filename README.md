@@ -1,10 +1,8 @@
 HoneySAP: SAP Low-interaction honeypot
 ======================================
 
-[![Build and test HoneySAP](https://github.com/SecureAuthCorp/HoneySAP/actions/workflows/build_and_test.yml/badge.svg)](https://github.com/SecureAuthCorp/HoneySAP/actions/workflows/build_and_test.yml)
+[![Build and test HoneySAP](https://github.com/OWASP/HoneySAP/actions/workflows/build_and_test.yml/badge.svg)](https://github.com/OWASP/HoneySAP/actions/workflows/build_and_test.yml)
 [![Documentation Status](https://readthedocs.org/projects/honeysap/badge/?version=latest)](https://honeysap.readthedocs.io/en/latest/?badge=latest)
-
-SECUREAUTH LABS. Copyright (C) 2022 SecureAuth Corporation. All rights reserved.
 
 Version 0.1.2.dev0 (XXX 2022)
 
@@ -55,8 +53,11 @@ file for more details.
 Authors
 -------
 
-The tool was designed and developed by Martin Gallo from [SecureAuth's Innovation
-Labs](https://www.secureauth.com/labs/) team, with the help of many contributors.
+The tool was initially designed and developed by Martin Gallo wile working at
+[SecureAuth's Innovation Labs](https://www.secureauth.com/labs/) team, with the
+help of many contributors. The code was then contributed by SecureAuth to the
+OWASP CBAS Project in October 2022.
+
 
 Disclaimer
 ----------
@@ -79,6 +80,7 @@ Contact Us
 ----------
 
 Whether you want to report a bug, send a patch, or give some suggestions
-on this package, drop us a few lines at oss@secureauth.com.
+on this package, drop a few lines to
+[OWASP CBAS' project leaders](https://owasp.org/www-project-core-business-application-security/#leaders).
 
 For security-related questions check our [security policy](SECURITY.md).

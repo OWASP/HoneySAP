@@ -1,9 +1,10 @@
 Changelog
 =========
 
-v0.1.2 - 2021-XX-XX
+v0.1.2 - 2022-XX-XX
 -------------------
 
+- Project was contributed by SecureAuth to the OWASP CBAS Project in October 2022.
 - Bumped requirements libraries.
 - Using Sphinx 1.8.5 for documentation.
 - Added GitHub actions to run unit tests.
