@@ -27,7 +27,7 @@ First step would be to install system packages that are required::
 After having all the system packages ready, you can proceed to install HoneySAP::
 
    cd /opt
-   git clone https://github.com/SecureAuthCorp/honeysap
+   git clone https://github.com/OWASP/honeysap
    cd honeysap
    sudo python -m pip install .
 

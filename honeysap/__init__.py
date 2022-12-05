@@ -1,7 +1,5 @@
 # HoneySAP - SAP low-interaction honeypot
 #
-# SECUREAUTH LABS. Copyright (C) 2021 SecureAuth Corporation. All rights reserved.
-#
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
 # as published by the Free Software Foundation; either version 2
@@ -13,7 +11,8 @@
 # GNU General Public License for more details.
 #
 # Author:
-#   Martin Gallo (@martingalloar) from SecureAuth's Innovation Labs team.
+#   Martin Gallo (@martingalloar)
+#   Code contributed by SecureAuth to the OWASP CBAS project
 #
 
 """
@@ -24,7 +23,6 @@ HoneySAP is a low-interaction research-focused honeypot specific for SAP
 services. It's aimed at learn the techniques and motivations behind attacks
 against SAP systems.
 
-:copyright: SECUREAUTH LABS. Copyright (C) 2021 SecureAuth Corporation. All rights reserved.
 :license: GNU General Public License v2 or later (GPLv2+)
 
 """
@@ -32,10 +30,10 @@ against SAP systems.
 __version__ = '0.1.2.dev0'
 """The version of honeysap"""
 
-__url__ = "https://www.secureauth.com/labs/open-source-tools"
+__url__ = "https://owasp.org/www-project-core-business-application-security/"
 """The URL for honeysap's homepage"""
 
-__repo__ = "https://github.com/SecureAuthCorp/honeysap"
+__repo__ = "https://github.com/OWASP/honeysap"
 """The URL for honeysap's repository"""
 
 __license__ = "GNU General Public License v2 or later (GPLv2+)"
