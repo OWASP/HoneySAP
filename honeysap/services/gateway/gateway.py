@@ -27,6 +27,9 @@ from pysap.SAPRFC import (SAPRFC, SAPRFCDTStruct, SAPRFCEXTEND,
                           rfc_req_type_values, rfc_func_type_values,
                           rfc_monitor_cmd_values, cpic_padd)
 from pysap.SAPNI import (SAPNIServerThreaded, SAPNIServerHandler, SAPNIClient)
+from pysap.SAPNWRFC import (find_tlv_field_by_marker, find_tlv_field_by_padd,
+                             decode_value, extract_rfc_params, extract_xml_data)
+from pysap.utils.crypto.rfc import ab_descramble
 # Custom imports
 from honeysap.core.logger import Loggeable
 from honeysap.core.service import BaseTCPService
@@ -60,27 +63,11 @@ MARKER_IP        = b"\x00\x07"  # cpic_ip
 MARKER_HOSTNAME  = b"\x00\x08"  # cpic_host_sid_inbr
 MARKER_DEST      = b"\x00\x06"  # cpic_dest
 
-# 64-byte lookup table used by SAP's ab_scramble function (from NWRFC SDK).
-# The password field is: [4-byte LE seed][scrambled password bytes].
-# Each byte is XOR'd with table[(start_idx + i) % 64] ^ ((seed*i*i - i) & 0xFF).
-_AB_SCRAMBLE_TABLE = bytes([
-    0xf0, 0xed, 0x53, 0xb8, 0x32, 0x44, 0xf1, 0xf8,
-    0x76, 0xc6, 0x79, 0x59, 0xfd, 0x4f, 0x13, 0xa2,
-    0xc1, 0x51, 0x95, 0xec, 0x54, 0x83, 0xc2, 0x34,
-    0x77, 0x49, 0x43, 0xa2, 0x7d, 0xe2, 0x65, 0x96,
-    0x5e, 0x53, 0x98, 0x78, 0x9a, 0x17, 0xa3, 0x3c,
-    0xd3, 0x83, 0xa8, 0xb8, 0x29, 0xfb, 0xdc, 0xa5,
-    0x55, 0xd7, 0x02, 0x77, 0x84, 0x13, 0xac, 0xdd,
-    0xf9, 0xb8, 0x31, 0x16, 0x61, 0x0e, 0x6d, 0xfa,
-])
-
-
 def _descramble_rfc_password(raw_field):
     """Descramble an RFC password using SAP's ab_scramble algorithm.
 
-    The password field layout is [4-byte LE seed][scrambled bytes].
-    Each byte is XOR'd with: table[(start_idx + i) % 64] ^ ((seed*i*i - i) & 0xFF)
-    where start_idx is derived from the seed.
+    The password field layout is [4-byte LE seed][scrambled bytes]. Tries
+    ASCII (direct-RFC / NUC mode) first, then UTF-16LE (GW / Unicode mode).
 
     Returns the plaintext password string, or the hex representation
     if descrambling fails.
@@ -88,32 +75,16 @@ def _descramble_rfc_password(raw_field):
     if len(raw_field) < 5:
         return raw_field.hex()
 
-    seed = struct.unpack_from("<I", raw_field, 0)[0]
-    data = bytearray(raw_field[4:])
-
-    # Compute starting table index (same derivation as in ab_scramble)
-    tmp = (seed ^ (seed >> 5)) & 0xFFFFFFFF
-    start_idx = (tmp ^ ((seed << 1) & 0xFFFFFFFF)) & 0xFFFFFFFF
-
-    for i in range(len(data)):
-        tidx = (start_idx + i) & 0x3f
-        sval = ((seed * i * i) - i) & 0xFFFFFFFF
-        data[i] ^= _AB_SCRAMBLE_TABLE[tidx] ^ (sval & 0xFF)
-
-    # Try ASCII (direct-RFC / NUC mode)
-    plain = bytes(data).rstrip(b"\x00")
     try:
-        text = plain.decode("ascii")
+        text = ab_descramble(raw_field, encoding="ascii")
         if text.isprintable():
             return text
     except (UnicodeDecodeError, ValueError):
         pass
 
-    # Try UTF-16LE (GW / Unicode mode): the scrambler operates on raw bytes
-    # so the descrambled output is still UTF-16LE (one null high-byte per ASCII char).
     try:
-        if len(data) % 2 == 0:
-            text = bytes(data).decode("utf-16-le").rstrip("\x00")
+        if (len(raw_field) - 4) % 2 == 0:
+            text = ab_descramble(raw_field, encoding="utf-16-le")
             if text and text.isprintable():
                 return text
     except (UnicodeDecodeError, ValueError):
@@ -132,55 +103,6 @@ def _strip_field(val):
     return str(val) if val is not None else None
 
 
-def _extract_cpic_field_by_padd(data, padd_bytes):
-    """Find a CPIC TLV field by its full 4-byte padding marker.
-
-    Layout: [4-byte padd][2-byte big-endian length][data]
-    Returns the raw data bytes, or None.
-    """
-    idx = data.find(padd_bytes)
-    if idx < 0:
-        return None
-    offset = idx + 4
-    if offset + 2 > len(data):
-        return None
-    length = struct.unpack("!H", data[offset:offset + 2])[0]
-    if length == 0 or offset + 2 + length > len(data):
-        return None
-    return data[offset + 2:offset + 2 + length]
-
-
-def _extract_cpic_field_by_marker(data, marker, search_start=0):
-    """Find a CPIC TLV field by its 2-byte start-marker.
-
-    Scans for any 4-byte delimiter where bytes[2:4] == marker.
-    Layout: [2-byte end-of-prev][2-byte start-marker][2-byte length][data]
-    Returns (raw_data_bytes, end_offset) or (None, search_start).
-    """
-    idx = search_start
-    while idx < len(data) - 7:
-        if data[idx + 2:idx + 4] == marker:
-            length = struct.unpack("!H", data[idx + 4:idx + 6])[0]
-            end = idx + 6 + length
-            if length > 0 and end <= len(data):
-                return data[idx + 6:end], end
-        idx += 1
-    return None, search_start
-
-
-def _decode_rfc_string(raw):
-    """Decode an RFC string field, trying ASCII first then UTF-16LE."""
-    if raw is None:
-        return None
-    # Check if it looks like UTF-16LE (every other byte is 0x00 for ASCII range)
-    if len(raw) >= 4 and raw[1:2] == b"\x00" and raw[3:4] == b"\x00":
-        try:
-            return raw.decode("utf-16-le").strip("\x00 ")
-        except (UnicodeDecodeError, ValueError):
-            pass
-    return raw.decode("ascii", errors="replace").strip("\x00 ")
-
-
 # Pre-compiled regex for fallback UTF-16LE function name extraction.
 _RE_UTF16LE_FUNCNAME = re.compile(rb"((?:[A-Z/][A-Z0-9_/]\x00){4,})")
 
@@ -196,104 +118,6 @@ _INFRA_FUNCS = frozenset({
     "RFC_GET_FUNCTION_INTERFACE", "RFC_SYSTEM_INFO",
     "DDIF_FIELDINFO_GET", "RFC_PING",
 })
-
-
-def _extract_rfc_params(raw):
-    """Extract import parameters from an RFC function call request.
-
-    Scans for 0x0201 (parameter-name) TLVs that carry a UTF-16LE name,
-    then reads the immediately following 0x0203 (parameter-value) TLV.
-
-    Returns a dict of {name: value} strings.  Names that look like
-    internal SDK fields (no letters, very short, or all-digits) are skipped.
-    """
-    params = {}
-    idx = 0
-    while idx < len(raw) - 7:
-        if raw[idx + 2:idx + 4] == b"\x02\x01":
-            name_len = struct.unpack("!H", raw[idx + 4:idx + 6])[0]
-            name_end = idx + 6 + name_len
-            if 2 <= name_len <= 120 and name_end <= len(raw):
-                name_raw = raw[idx + 6:name_end]
-                name = _decode_rfc_string(name_raw)
-                if name and name.replace("_", "").replace("/", "").isalnum():
-                    val, _ = _extract_cpic_field_by_marker(raw, b"\x02\x03", name_end)
-                    if val:
-                        decoded = _decode_rfc_string(val)
-                        if decoded is not None:
-                            params[name] = decoded
-        idx += 1
-    return params
-
-
-def _extract_xml_data(raw):
-    """Extract XML-encoded parameters and table rows from an RFC call body.
-
-    The NWRFC SDK serialises table/structure parameters as ASCII XML fragments
-    embedded in the F_SAP_SEND body, e.g.:
-
-        <IT_MODULE><item><FIELD>value</FIELD></item></IT_MODULE>
-        <IV_GUID>base64==</IV_GUID>
-
-    Returns a dict mapping parameter name → value, where value is either a
-    plain string (scalar) or a list of dicts/strings (table rows).
-    """
-    import html as _html
-    result = {}
-    raw_bytes = bytes(raw)
-
-    # Find the first '<' to locate the XML region; everything before is binary.
-    xml_start = raw_bytes.find(b"<")
-    if xml_start == -1:
-        return result
-
-    # Decode the tail of the packet as ASCII (XML is always ASCII in NWRFC).
-    try:
-        xml_region = raw_bytes[xml_start:].decode("ascii", errors="replace")
-    except Exception:
-        return result
-
-    # Extract all top-level <TAG>...</TAG> blocks.
-    for m in re.finditer(r'<([A-Z_/][A-Z0-9_/]*)>(.*?)</\1>', xml_region, re.DOTALL):
-        tag, content = m.group(1), m.group(2)
-        # Skip tags that look like inner fields (contain '<' → already captured
-        # by a parent match) or are very short noise tags.
-        if len(tag) < 2:
-            continue
-        content = content.strip()
-
-        # Table parameter: contains <item> rows.
-        if "<item>" in content:
-            rows = []
-            for item_m in re.finditer(r'<item>(.*?)</item>', content, re.DOTALL):
-                item_body = item_m.group(1).strip()
-                # Structured row: contains named sub-fields.
-                if "<" in item_body:
-                    row = {}
-                    for fld in re.finditer(r'<([A-Z_/][A-Z0-9_/]*)>(.*?)</\1>',
-                                           item_body, re.DOTALL):
-                        fname, fval = fld.group(1), fld.group(2)
-                        if fname == "T_CODE":
-                            # Nested table of ABAP lines.
-                            row[fname] = [
-                                _html.unescape(li.group(1))
-                                for li in re.finditer(r'<item>(.*?)</item>',
-                                                      fval, re.DOTALL)
-                            ]
-                        else:
-                            row[fname] = _html.unescape(fval.strip())
-                    if row:
-                        rows.append(row)
-                else:
-                    # Scalar row (table of a single unnamed field).
-                    rows.append(_html.unescape(item_body))
-            if rows:
-                result[tag] = rows
-        else:
-            # Scalar parameter.
-            result[tag] = _html.unescape(content)
-
-    return result
 
 
 def _make_conversation_id():
@@ -1842,7 +1666,7 @@ class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
 
             if func_module not in _INFRA_FUNCS:
                 # Business FM call — extract import parameters and highlight
-                params = _extract_rfc_params(raw)
+                params = extract_rfc_params(raw)
                 if params:
                     data["parameters"] = params
                 param_str = " ".join("%s=%r" % (k, v) for k, v in params.items()) if params else ""
@@ -1853,7 +1677,7 @@ class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
                     ("  [" + param_str + "]") if param_str else "",
                 )
                 # Log XML-encoded extended data (tables and structures).
-                xml_data = _extract_xml_data(raw)
+                xml_data = extract_xml_data(raw)
                 if xml_data:
                     data["xml_data"] = xml_data
                     for tag, val in xml_data.items():
@@ -1975,9 +1799,9 @@ class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
         by a 2-byte length and the function name.  The name can be ASCII
         (first F_SAP_SEND) or UTF-16LE (subsequent sends).
         """
-        val = _extract_cpic_field_by_padd(raw, CPIC_RFC_F_PADD)
+        val = find_tlv_field_by_padd(raw, CPIC_RFC_F_PADD)
         if val:
-            return _decode_rfc_string(val)
+            return decode_value(val)
 
         # Fallback: search for UTF-16LE uppercase function-name patterns
         # like R\x00F\x00C\x00_\x00 in the body
@@ -2004,7 +1828,7 @@ class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
         independent of field order, which varies across NWRFC SDK versions.
         """
         # SAP logon username (cpic_username1, marker 0x0111)
-        val, _ = _extract_cpic_field_by_marker(raw, MARKER_USERNAME)
+        val, _ = find_tlv_field_by_marker(raw, MARKER_USERNAME)
         if val:
             self.logger.debug("login username1 raw (%d bytes): %s", len(val), val.hex())
             username = val.decode("ascii", errors="replace").strip("\x00 ")
@@ -2016,7 +1840,7 @@ class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
         # OS / client-side username (cpic_username2, marker 0x0009).
         # NWRFC SDK sends the local OS user here; it is absent in some
         # older SAP GUI / non-NWRFC clients.
-        val, _ = _extract_cpic_field_by_marker(raw, MARKER_OS_USER)
+        val, _ = find_tlv_field_by_marker(raw, MARKER_OS_USER)
         if val:
             self.logger.debug("login username2 raw (%d bytes): %s", len(val), val.hex())
             os_user = val.decode("ascii", errors="replace").strip("\x00 ")
@@ -2024,7 +1848,7 @@ class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
                 data["os_username"] = os_user
 
         # Client number
-        val, _ = _extract_cpic_field_by_marker(raw, MARKER_CLI_NBR)
+        val, _ = find_tlv_field_by_marker(raw, MARKER_CLI_NBR)
         if val:
             cli_nbr = val.decode("ascii", errors="replace").strip("\x00 ")
             if cli_nbr:
@@ -2033,34 +1857,34 @@ class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
                     self.server.clients[self.client_address].client_nbr = cli_nbr
 
         # Password — SAP XOR-scrambled
-        val, _ = _extract_cpic_field_by_marker(raw, MARKER_PASSWORD)
+        val, _ = find_tlv_field_by_marker(raw, MARKER_PASSWORD)
         if val:
             data["password_hash"] = val.hex()
             data["password"] = _descramble_rfc_password(val)
 
         # Client IP
-        val, _ = _extract_cpic_field_by_marker(raw, MARKER_IP)
+        val, _ = find_tlv_field_by_marker(raw, MARKER_IP)
         if val:
             ip = val.decode("ascii", errors="replace").strip("\x00 ")
             if ip:
                 data["client_ip"] = ip
 
         # Client hostname/SID/instance
-        val, _ = _extract_cpic_field_by_marker(raw, MARKER_HOSTNAME)
+        val, _ = find_tlv_field_by_marker(raw, MARKER_HOSTNAME)
         if val:
             hostname = val.decode("ascii", errors="replace").strip("\x00 ")
             if hostname:
                 data["client_hostname"] = hostname
 
         # Destination
-        val, _ = _extract_cpic_field_by_marker(raw, MARKER_DEST)
+        val, _ = find_tlv_field_by_marker(raw, MARKER_DEST)
         if val:
             dest = val.decode("ascii", errors="replace").strip("\x00 ")
             if dest:
                 data["destination"] = dest
 
         # Program / client library
-        val = _extract_cpic_field_by_padd(raw, CPIC_PROGRAM_PADD)
+        val = find_tlv_field_by_padd(raw, CPIC_PROGRAM_PADD)
         if val:
             program = val.decode("ascii", errors="replace").strip("\x00 ")
             if program:
@@ -2478,11 +2302,11 @@ class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
         funcname_bytes = "FUNCNAME".encode("utf-16-le")
         idx = raw.find(funcname_bytes)
         if idx >= 0:
-            val, _ = _extract_cpic_field_by_marker(
+            val, _ = find_tlv_field_by_marker(
                 raw, b"\x02\x03", idx + len(funcname_bytes)
             )
             if val:
-                name = _decode_rfc_string(val)
+                name = decode_value(val)
                 if name:
                     return name
 
@@ -2777,11 +2601,11 @@ class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
                 break
 
             after_name = idx + len(tabname_bytes)
-            val, _ = _extract_cpic_field_by_marker(
+            val, _ = find_tlv_field_by_marker(
                 raw, b"\x02\x03", after_name
             )
             if val:
-                decoded = _decode_rfc_string(val)
+                decoded = decode_value(val)
                 if decoded:
                     is_param_name = (idx >= 4 and
                                      raw[idx - 4:idx - 2] == b"\x02\x01")
