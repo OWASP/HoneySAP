@@ -6,3 +6,4 @@ PyYAML>=5.4.1
 colorlog<6
 jsoncomment>=0.3.3
 hpfeeds>=3.0.0
+netaddr
