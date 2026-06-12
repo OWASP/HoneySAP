@@ -25,6 +25,7 @@ from scapy.packet import bind_layers
 
 from pysap.SAPDiag import (SAPDiag, SAPDiagDP, SAPDiagItem)
 from pysap.SAPNI import (SAPNIServerThreaded, SAPNIServerHandler, SAPNIClient)
+from pysap.SAPNWRFC import decode_value
 from pysap.SAPDiagItems import (support_data_sapnw_702, SAPDiagAreaSize,
                                 SAPDiagMenuEntries, SAPDiagMenuEntry,
                                 SAPDiagDyntAtom, SAPDiagDyntAtomItem,
@@ -119,11 +120,27 @@ class SAPDispatcherServerHandler(Loggeable, SAPNIServerHandler):
         self.logger.debug("Received message from client %s" % str(self.client_address))
         diag = self.packet[SAPDiag]
 
-        # Handle exit transaction (OK CODE = /i)
-        if len(diag.get_item("APPL", "VARINFO", "OKCODE")) > 0 and diag.get_item("APPL", "VARINFO", "OKCODE")[0].item_value == "/i":
-            self.logger.debug("Windows closed by the client %s" % str(self.client_address))
-            self.session.add_event("Windows closed by the client")
+        # Client signals end of conversation/connection (e.g. closing the
+        # SAP GUI window before login) with no items, just com_flags set.
+        if diag.com_flag_TERM_EOC or diag.com_flag_TERM_EOP:
+            self.logger.debug("Connection terminated by the client %s" % str(self.client_address))
+            self.session.add_event("Connection terminated by the client")
             self.logoff()
+            return
+
+        # Handle exit transaction (OK CODE = /i)
+        okcode_items = diag.get_item("APPL", "VARINFO", "OKCODE")
+        if okcode_items:
+            okcode = okcode_items[0].item_value
+            if isinstance(okcode, bytes):
+                okcode = decode_value(okcode)
+            else:
+                okcode = str(okcode).strip("\x00 ")
+            if okcode == "/i":
+                self.logger.debug("Windows closed by the client %s" % str(self.client_address))
+                self.session.add_event("Windows closed by the client")
+                self.logoff()
+                return
 
         # Handle events (UI EVENT SOURCE)
         elif len(diag.get_item("APPL", "UI_EVENT", "UI_EVENT_SOURCE")) > 0:
