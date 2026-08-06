@@ -41,14 +41,39 @@ class Event(object):
             raise Exception("Event not attached to a session")
         return "<Event '%s' at %s in session '%s'>" % (self.event, self.timestamp, self.session.uuid)
 
+    @staticmethod
+    def _encode_field(value):
+        """Encode a request/response field for JSON serialization."""
+        if not value:
+            return ""
+        if isinstance(value, str):
+            value = value.encode("utf-8", errors="replace")
+        return b64encode(value).decode("ascii")
+
+    @staticmethod
+    def _serialize_data(data):
+        """Make event data JSON-serializable."""
+        if not data:
+            return ""
+        if isinstance(data, bytes):
+            try:
+                return data.decode("utf-8")
+            except UnicodeDecodeError:
+                return b64encode(data).decode("ascii")
+        if isinstance(data, dict):
+            return {k: Event._serialize_data(v) for k, v in data.items()}
+        if isinstance(data, (list, tuple)):
+            return [Event._serialize_data(v) for v in data]
+        return data
+
     def __repr__(self):
         if self.session is None:
             raise Exception("Event not attached to a session")
         return json.dumps({"session": str(self.session.uuid),
                            "event": self.event,
-                           "data": self.data if self.data else "",
-                           "request": b64encode(self.request) if self.request else "",
-                           "response": b64encode(self.response) if self.response else "",
+                           "data": self._serialize_data(self.data),
+                           "request": self._encode_field(self.request),
+                           "response": self._encode_field(self.response),
                            "service": self.session.service,
                            "source_ip": self.session.source_ip,
                            "source_port": self.session.source_port,

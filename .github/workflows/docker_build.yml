@@ -9,12 +9,12 @@ env:
    DOCKER_TAG: honeysap:development
 
 jobs:
-  test:
+  build:
     name: Build docker image
     runs-on: ubuntu-latest
     steps:
       - name: Checkout HoneySAP
-        uses: actions/checkout@v2
-      - name: Builds docker image
+        uses: actions/checkout@v4
+      - name: Build docker image
         run: |
           docker build -t ${DOCKER_TAG} -f deployment/Dockerfile .

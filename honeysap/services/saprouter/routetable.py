@@ -18,8 +18,6 @@
 # Standard imports
 
 # External imports
-from six import string_types
-from six.moves import range
 # Custom imports
 from honeysap.core.logger import Loggeable
 # Optional imports
@@ -54,7 +52,7 @@ class RouteTable(Loggeable):
         """Parses a route table entry.
         """
         # Parse the route as a string
-        if isinstance(entry, (string_types, unicode)):
+        if isinstance(entry, str):
             try:
                 action, talk_mode, target, port, password = entry.split(",", 5)
             except ValueError:

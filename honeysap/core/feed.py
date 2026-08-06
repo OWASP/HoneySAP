@@ -26,11 +26,9 @@ from .logger import Loggeable
 from .loader import ClassLoader
 
 
-class BaseFeed(Loggeable):
+class BaseFeed(Loggeable, metaclass=ABCMeta):
     """ Base attack feed class
     """
-
-    __metaclass__ = ABCMeta
 
     def __init__(self, config):
         """Initialize the attack session feed with the options provided.

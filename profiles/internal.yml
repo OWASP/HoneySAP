@@ -52,6 +52,57 @@ services:
         # Hostname
         hostname: sapnw702
 
+    -
+        # SAP Gateway service
+        # -------------------
+        service: SAPGatewayService
+        alias: GatewayService
+        enabled: yes
+        listener_port: 3300
+        listener_address: 0.0.0.0
+        hostname: sapnw702
+        sid: PRD
+        instance_number: "00"
+
+        # Optional: path to a semicolon-delimited RFM catalog CSV (exported
+        # from SAP with columns FUNCNAME;REMOTE_CALL;UPDATE_TASK;...PARAMTEXT).
+        # When set, the gateway will serve RFC_GET_FUNCTION_INTERFACE responses
+        # for any function module present in the catalog.
+        rfm_catalog: data/honeysap_rfm.csv
+        # Optional: path to the DDIC structure field definitions CSV (exported
+        # from SAP alongside the RFM catalog).  Used for DDIF_FIELDINFO_GET
+        # type lookups.
+        ddic_catalog: data/honeysap_ddic.csv
+
+    -
+        # SAP ICM (HTTP) service
+        # ----------------------
+        service: SAPICMService
+        alias: ICMService
+        enabled: yes
+        listener_port: 8000
+        release: "720"
+        hostname: sapnw702
+
+    -
+        # SAP Message Server (TCP) service
+        # --------------------------------
+        service: SAPMSService
+        alias: MessageServerService
+        enabled: yes
+        listener_port: 3600
+
+    -
+        # SAP Message Server (HTTP) service
+        # ---------------------------------
+        service: SAPMSHTTPService
+        alias: MessageServerHTTPService
+        enabled: yes
+        listener_port: 8100
+        release: 720
+        instance: PRD
+        hostname: sapnw702
+
 
 # Feeds configuration
 # -------------------

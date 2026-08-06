@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # encoding: utf-8
 # HoneySAP - SAP low-interaction honeypot
 #
@@ -59,7 +59,9 @@ setup(name=honeysap.__name__,   # Package information
                    'Intended Audience :: System Administrators',
                    'License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)',
                    'Programming Language :: Python',
+                   'Programming Language :: Python :: 3',
                    'Topic :: Security'],
+      python_requires='>=3.6',
       # Packages list
       packages=find_packages(),
       provides=['honeysap'],

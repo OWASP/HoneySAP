@@ -2,5 +2,13 @@
 # ============================================
 #
 
-# Allow any protocols to 10.0.0.100 port 3200
+# Allow any protocols to internal SAP systems
+# Dispatcher (3200), Gateway (3300), MS TCP (3600), ICM HTTP (8000), MS HTTP (8100)
 - allow,any,10.0.0.100,3200,
+- allow,any,10.0.0.100,3300,
+- allow,any,10.0.0.100,3600,
+- allow,any,10.0.0.100,8000,
+- allow,any,10.0.0.100,8100,
+- allow,any,10.0.0.150,3200,
+- allow,any,10.0.0.150,8000,
+- allow,any,10.0.0.150,8100,

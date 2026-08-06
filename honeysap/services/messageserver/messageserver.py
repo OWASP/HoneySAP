@@ -17,10 +17,11 @@
 
 # Standard imports
 from socket import timeout
-from SocketServer import ThreadingMixIn
-from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
+from http.server import HTTPServer, BaseHTTPRequestHandler
 # External imports
-from pysap import SAPMS
+from pysap.SAPMS import (SAPMS, ms_flag_values, ms_iflag_values,
+                         ms_opcode_values)
 from pysap.SAPNI import SAPNIServerThreaded, SAPNIServerHandler, SAPNIClient
 # Custom imports
 from honeysap.core.logger import Loggeable
@@ -35,20 +36,59 @@ class SAPMSServerHandler(Loggeable, SAPNIServerHandler):
 
     def __init__(self, request, client_address, server):
         Loggeable.__init__(self)
+        self.config = server.config
+        client_ip, client_port = client_address
+        server_ip, server_port = server.server_address
+        self.session = server.session_manager.get_session("message_server",
+                                                          client_ip,
+                                                          client_port,
+                                                          server_ip,
+                                                          server_port)
         SAPNIServerHandler.__init__(self, request, client_address, server)
 
     def handle_data(self):
-        self.packet.show()
         try:
             if SAPMS not in self.packet:
+                self.session.add_event("Invalid packet received",
+                                       data={"client": str(self.client_address)})
                 self.logger.debug("Invalid packet sent to SAPMS")
                 self.request.send(SAPMS())
+                return
+
+            ms = self.packet[SAPMS]
+            flag = getattr(ms, "flag", None)
+            iflag = getattr(ms, "iflag", None)
+            opcode = getattr(ms, "opcode", None)
+            fromname = getattr(ms, "fromname", "").strip()
+            toname = getattr(ms, "toname", "").strip()
+
+            data = {
+                "client": str(self.client_address),
+                "flag": flag,
+                "flag_name": ms_flag_values.get(flag, "UNKNOWN"),
+                "iflag": iflag,
+                "iflag_name": ms_iflag_values.get(iflag, "UNKNOWN"),
+                "fromname": fromname,
+                "toname": toname,
+            }
+            if opcode is not None:
+                data["opcode"] = opcode
+                data["opcode_name"] = ms_opcode_values.get(opcode, "UNKNOWN")
+
+            self.session.add_event("MS packet received",
+                                   data=data,
+                                   request=str(self.packet))
+
         except timeout:
             self.logger.debug("Timeout connection from %s", self.client_address)
 
 
 class SAPMSServerThreaded(SAPNIServerThreaded):
-    pass
+    def __init__(self, server_address, RequestHandlerClass,
+                 bind_and_activate=True, base_cls=SAPMS, **kwargs):
+        SAPNIServerThreaded.__init__(self, server_address, RequestHandlerClass,
+                                     bind_and_activate=bind_and_activate,
+                                     base_cls=base_cls, **kwargs)
 
 
 class SAPMSService(BaseTCPService):
@@ -56,7 +96,7 @@ class SAPMSService(BaseTCPService):
     server_cls = SAPMSServerThreaded
     handler_cls = SAPMSServerHandler
 
-    default_port = 3300
+    default_port = 3600
 
 
 class SAPMSHTTPServerHandler(Loggeable, BaseHTTPRequestHandler):
@@ -67,6 +107,13 @@ class SAPMSHTTPServerHandler(Loggeable, BaseHTTPRequestHandler):
 
     def __init__(self, request, client_address, server):
         Loggeable.__init__(self)
+        client_ip, client_port = client_address
+        server_ip, server_port = server.server_address
+        self.session = server.session_manager.get_session("message_server_http",
+                                                          client_ip,
+                                                          client_port,
+                                                          server_ip,
+                                                          server_port)
         BaseHTTPRequestHandler.__init__(self, request, client_address, server)
 
     def log_message(self, fmt, *args):
@@ -80,7 +127,7 @@ class SAPMSHTTPServerHandler(Loggeable, BaseHTTPRequestHandler):
         self.request_version = version = self.default_request_version
         self.close_connection = 1
         requestline = self.raw_requestline
-        requestline = requestline.rstrip('\r\n')
+        requestline = requestline.decode('iso-8859-1').rstrip('\r\n')
         self.requestline = requestline
         words = requestline.split()
         if len(words) == 3:
@@ -116,7 +163,8 @@ class SAPMSHTTPServerHandler(Loggeable, BaseHTTPRequestHandler):
         self.command, self.path, self.request_version = command, path, version
 
         # Examine the headers and look for a Connection directive
-        self.headers = self.MessageClass(self.rfile, 0)
+        from http.client import parse_headers
+        self.headers = parse_headers(self.rfile)
 
         conntype = self.headers.get('Connection', "")
         if conntype.lower() == 'close':
@@ -159,7 +207,11 @@ class SAPMSHTTPServerHandler(Loggeable, BaseHTTPRequestHandler):
     def build_301_to_icm(self):
         """Build a redirection to the ICM service"""
         hostname = self.server.config.get("hostname", self.default_hostname)
-        icm_port = self.server.config.config_for("SAPICMService")[0].get("listener_port", 8000)
+        try:
+            icm_configs = self.server.config.config_for("services", "service", "SAPICMService")
+            icm_port = icm_configs[0].get("listener_port", 8000)
+        except (IndexError, AttributeError):
+            icm_port = 8000
         url = "http://%s:%d%s" % (hostname,
                                   icm_port,
                                   self.path)
@@ -180,7 +232,7 @@ The document has moved <A HREF="%s"> here</A>
 </BODY></HTML>
 """ % (url)
 
-        self.wfile.write("%s 301 MOVED PERMANENTLY\n" % http_version)
+        self.wfile.write(("%s 301 MOVED PERMANENTLY\n" % http_version).encode())
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", len(body))
         self.send_header("location", url)
@@ -189,13 +241,25 @@ The document has moved <A HREF="%s"> here</A>
         if min_version >= 1:
             self.send_header("connection", "close")
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(body.encode())
 
     def do_request(self):
+        data = {
+            "client": str(self.client_address),
+            "method": self.command,
+            "path": self.path,
+            "user_agent": self.headers.get("User-Agent", ""),
+            "host": self.headers.get("Host", ""),
+        }
+
         if self.path.startswith("/msgserver"):
+            self.session.add_event("MS HTTP request to msgserver",
+                                   data=data)
             self.logger.debug("Received request to msgserver endpoint")
             self.do_request_msgserver()
         else:
+            self.session.add_event("MS HTTP request redirected to ICM",
+                                   data=data)
             self.logger.debug("Redirecting to ICM service")
             self.build_301_to_icm()
 

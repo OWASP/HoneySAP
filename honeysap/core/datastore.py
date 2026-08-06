@@ -34,11 +34,9 @@ class DataStoreKeyNotFound(Exception):
     """Key not found on the data store"""
 
 
-class BaseDataStore(Loggeable):
+class BaseDataStore(Loggeable, metaclass=ABCMeta):
     """Base DataStore class.
     """
-
-    __metaclass__ = ABCMeta
 
     def __init__(self):
         self.notifiers = {}

@@ -24,6 +24,11 @@ Features
 - modular services system
 - modular feeds system
 - console logging
+- SAP RFC Gateway emulation with full NWRFC SDK handshake support
+- RFM and DDIC catalog-driven responses for realistic function module interface replies
+- Credential capture (SAP logon user, client, descrambled password, OS user, IP)
+- XML parameter extraction and logging for all RFC business function calls
+- CVE-2025-42957 (`/SLOAE/DEPLOY`) exploit detection and ABAP code capture
 
 
 Installation

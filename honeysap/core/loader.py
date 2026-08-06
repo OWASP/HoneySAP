@@ -16,7 +16,9 @@
 #
 
 # Standard imports
+import sys
 import pkgutil
+import importlib.util
 from os.path import isabs, join, abspath, dirname
 from inspect import getmembers, isabstract, isclass
 # External imports
@@ -48,7 +50,10 @@ class ClassLoader(Loggeable):
         for class_loader, class_modulename, _ in pkgutil.walk_packages([self.directory, ]):
             self.logger.debug("Found module %s", class_modulename)
 
-            class_module = class_loader.find_module(class_modulename).load_module(class_modulename)
+            spec = class_loader.find_spec(class_modulename, None)
+            class_module = importlib.util.module_from_spec(spec)
+            sys.modules[class_modulename] = class_module
+            spec.loader.exec_module(class_module)
             for class_name, actual_class in getmembers(class_module, self.is_subclass):
 
                 self.logger.debug("Found class %s in module %s", class_name, class_modulename)

@@ -7,6 +7,7 @@ __pycache__/
 
 # Distribution / packaging
 .Python
+.venv/
 env/
 build/
 develop-eggs/
@@ -63,3 +64,8 @@ target/
 .project
 .pydevproject
 .settings
+.claude
+.DS_Store
+
+# Other files
+*.trc

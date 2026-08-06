@@ -48,3 +48,6 @@ SAP Services
 
    saprouter
    dispatcher
+   gateway
+   icm
+   messageserver

@@ -38,7 +38,7 @@ from .routetable import RouteTable
 
 
 def unix_time(dt):
-    return (dt - datetime(1970, 1, 1)).total_seconds()
+    return int((dt - datetime(1970, 1, 1)).total_seconds())
 
 
 class SAPRouterClient(Loggeable, SAPNIClient):
@@ -161,6 +161,9 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
                     self.packet = self.request.recv()
                     # Pass the control to the handle_data function
                     self.handle_data()
+
+        except OSError:
+            self.logger.debug("Client %s disconnected", self.client_address)
 
         except Timeout as t:
             # If this is another timeout, raise it so another block can
@@ -377,7 +380,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
             self.logger.debug("Received information request (password %s)", pkt.adm_password)
 
             # If a password was specified but doesn't match, return error
-            if self.info_password and self.info_password != pkt.adm_password.strip("\x00"):
+            if self.info_password and self.info_password != pkt.adm_password.strip(b"\x00").decode():
                 self.session.add_event("Information request invalid password", data=pkt.adm_password, request=str(self.packet))
                 return self.return_error(return_code=-94,
                                          error="route denied")
@@ -425,7 +428,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
 
             info_clients.append(info_client)
 
-        info_clients = "".join([str(client) for client in info_clients])
+        info_clients = b"".join([bytes(client) for client in info_clients])
         info_pkt = Raw(info_clients)
         self.request.send(info_pkt)
         self.session.add_event("Returned information request", response=str(info_pkt))
@@ -442,22 +445,27 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
         self.session.add_event("Returned information request", data={"packet": "info_packet"},
                                response=str(info_pkt))
 
-        info_pkt = Raw("Total no. of clients: %d\x00" % len(self.server.clients))
+        info_pkt = Raw(("Total no. of clients: %d\x00" % len(self.server.clients)).encode())
         self.request.send(info_pkt)
         self.session.add_event("Returned information request", data={"packet": "total_no_clients"},
                                response=str(info_pkt))
 
-        info_pkt = Raw("Working directory   : %s\x00" % self.route_table_working_directory)
+        info_pkt = Raw(("Working directory   : %s\x00" % self.route_table_working_directory).encode())
         self.request.send(info_pkt)
         self.session.add_event("Returned information request", data={"packet": "working_directory"},
                                response=str(info_pkt))
 
-        info_pkt = Raw("Routtab             : %s\x00" % self.route_table_filename)
+        info_pkt = Raw(("Routtab             : %s\x00" % self.route_table_filename).encode())
         self.request.send(info_pkt)
         self.session.add_event("Returned information request", data={"packet": "routtab"},
                                response=str(info_pkt))
 
-        self.request.close()
+        # Send a zero-length NI packet as end-of-data terminator
+        self.request.send(Raw(b""))
+
+        # Signal the handler loop to stop; finish() will close the socket
+        # gracefully so the client receives a proper FIN instead of RST
+        self.close()
 
     def return_error(self, **options):
         """Returns an error response"""
@@ -471,7 +479,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
                                                                           self.router_version_patch,
                                                                           self.hostname))
         for field in list(options.keys()):
-            setattr(error_text, field, options[field])
+            setattr(error_text, field, str(options[field]))
 
         error_pkt = SAPRouter(type=SAPRouter.SAPROUTER_ERROR,
                               version=self.router_version,
@@ -510,5 +518,31 @@ class SAPRouterService(BaseTCPService):
         self.server.listener_port = self.listener_port
         self.server.listener_address = self.listener_address
         # Generates a random pid and records the time when the service started
-        self.server.pid = self.server.config.get("pid", None)
+        self.server.pid = self.server.config.get("pid", 0)
         self.server.time_started = self.server.config.get("time_started", datetime.today())
+
+        # Register virtual services from the route table as synthetic clients
+        # so they appear in info responses, mimicking a real SAP Router that
+        # shows its backend connections in the connection table.
+        self._register_virtual_clients()
+
+    def _register_virtual_clients(self):
+        """Register synthetic client entries for allowed targets in the route
+        table, so they appear in the router's info response as connected
+        backend services."""
+        if not hasattr(self.server.route_table, 'table'):
+            return
+        for (host, port), (action, talk_mode, password) in self.server.route_table.table.items():
+            if action != RouteTable.ROUTE_ALLOW:
+                continue
+            self.server.clients_count += 1
+            client_key = (host, port)
+            client = SAPRouterClient()
+            client.id = self.server.clients_count
+            client.address = self.listener_address
+            client.partner = host
+            client.service = str(port)
+            client.routed = True
+            client.connected = True
+            client.connected_on = self.server.time_started
+            self.server.clients[client_key] = client

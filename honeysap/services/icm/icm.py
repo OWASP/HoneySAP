@@ -28,6 +28,28 @@ class SAPICMService(BaseHTTPService):
     default_release = 720
     template_folder = "honeysap/services/icm/templates"
 
+    def setup_server(self):
+        super(SAPICMService, self).setup_server()
+
+        @self.app.before_request
+        def log_request():
+            from flask import request as flask_request
+            client_ip = flask_request.remote_addr
+            session = self.session_manager.get_session(
+                "icm_http", client_ip, 0,
+                self.listener_address, self.listener_port)
+            data = {
+                "client_ip": client_ip,
+                "method": flask_request.method,
+                "path": flask_request.path,
+                "url": flask_request.url,
+                "user_agent": flask_request.headers.get("User-Agent", ""),
+                "host": flask_request.headers.get("Host", ""),
+            }
+            session.add_event("ICM HTTP request", data=data)
+            self.logger.debug("ICM request from %s: %s %s",
+                              client_ip, flask_request.method, flask_request.path)
+
     def version_string(self):
         release = str(self.server.config.get("release", self.default_release))
         release = "%s.%s" % (release[0], release[1:])
@@ -37,7 +59,7 @@ class SAPICMService(BaseHTTPService):
                                                                  icm_release)
 
     def route_index(self):
-        pass
+        return render_template("404.html"), 404
     route_index.rule = "/"
 
     def error_400(self, code):

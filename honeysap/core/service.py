@@ -27,11 +27,9 @@ from .logger import Loggeable
 from .loader import ClassLoader
 
 
-class BaseService(Loggeable):
+class BaseService(Loggeable, metaclass=ABCMeta):
     """ Base service class
     """
-
-    __metaclass__ = ABCMeta
 
     @property
     def alias(self):
@@ -173,7 +171,7 @@ class BaseHTTPService(BaseService):
         for name in [x for x in methods if x.startswith("error_")]:
             method = getattr(self, name)
             code = int(name.split("_", 2)[1])
-            self.app.error_handler_spec[None][code] = method
+            self.app.register_error_handler(code, method)
             self.logger.debug("Adding handler '%s' for error code '%d'", name, code)
 
     def run(self):

@@ -23,7 +23,6 @@ from os.path import isfile
 from abc import abstractmethod, ABCMeta
 from optparse import OptionParser, Values
 # External imports
-from six import string_types
 # Optional imports
 try:
     from yaml import Loader as yaml_loader, load as yaml_load
@@ -40,9 +39,7 @@ class ConfigurationParserNotFound(Exception):
     """Configuration file parser not found"""
 
 
-class ConfigurationFileParser(object):
-
-    __metaclass__ = ABCMeta
+class ConfigurationFileParser(object, metaclass=ABCMeta):
 
     def __init__(self):
         self._config_files = []
@@ -76,8 +73,6 @@ class ConfigurationJSONParser(ConfigurationFileParser):
             return {self.object_hook(key): self.object_hook(value) for key, value in inp.items()}
         elif isinstance(inp, list):
             return [self.object_hook(element) for element in inp]
-        elif isinstance(inp, unicode):
-            return inp.encode('utf-8')
         else:
             return inp
 
@@ -99,22 +94,25 @@ class ConfigurationJSONParser(ConfigurationFileParser):
         return Configuration(config)
 
 
-class ConfigurationYAMLLoader(yaml_loader):
-    """Customized YAML loader to use !include inside configuration files"""
+if yaml_loader is not None:
+    class ConfigurationYAMLLoader(yaml_loader):
+        """Customized YAML loader to use !include inside configuration files"""
 
-    include_string = "!include"
+        include_string = "!include"
 
-    def __init__(self, stream):
-        self._config_files = []
-        self._root = os.path.split(stream.name)[0]
-        super(ConfigurationYAMLLoader, self).__init__(stream)
-        self.add_constructor(self.include_string, ConfigurationYAMLLoader.include)
+        def __init__(self, stream):
+            self._config_files = []
+            self._root = os.path.split(stream.name)[0]
+            super(ConfigurationYAMLLoader, self).__init__(stream)
+            self.add_constructor(self.include_string, ConfigurationYAMLLoader.include)
 
-    def include(self, node):
-        filename = os.path.join(self._root, self.construct_scalar(node))
-        self._config_files.append(filename.encode('utf-8'))
-        with open(filename, 'r') as f:
-            return yaml_load(f, ConfigurationYAMLLoader)
+        def include(self, node):
+            filename = os.path.join(self._root, self.construct_scalar(node))
+            self._config_files.append(filename)
+            with open(filename, 'r') as f:
+                return yaml_load(f, ConfigurationYAMLLoader)
+else:
+    ConfigurationYAMLLoader = None
 
 
 class ConfigurationYAMLParser(ConfigurationFileParser):
@@ -180,7 +178,7 @@ class Configuration(Values):
             fnc = self._update_loose
 
         if from_file is True:
-            if isinstance(obj, (string_types, unicode, )) and isfile(obj):
+            if isinstance(obj, str) and isfile(obj):
                 valid_parser = None
                 for parser in self._options_parsers:
                     if parser.check_file(obj):
