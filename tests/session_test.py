@@ -87,5 +87,8 @@ def test_suite():
     return suite
 
 
+test_suite.__test__ = False
+
+
 if __name__ == "__main__":
     unittest.TextTestRunner(verbosity=2).run(test_suite())

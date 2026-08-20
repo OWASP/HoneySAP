@@ -20,8 +20,7 @@
 # External imports
 from sqlalchemy import create_engine
 from sqlalchemy.schema import Column
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.types import Integer, DateTime, String, Text
 # Custom imports
 from honeysap.core.feed import BaseFeed
@@ -62,7 +61,7 @@ class DBFeed(BaseFeed):
 
     def stop(self):
         """Stops the database connection"""
-        self.session.close_all()
+        self.session.close()
         self.logger.debug("Closed database session")
 
     def log(self, event):
