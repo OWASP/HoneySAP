@@ -16,3 +16,9 @@ more than welcome.
 
 - Create and send a pull request and ask the author until it gets merged and
   published.
+
+.. toctree::
+   :maxdepth: 2
+   :glob:
+
+   *

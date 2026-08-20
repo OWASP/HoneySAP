@@ -1,7 +1,7 @@
 Changelog
 =========
 
-v0.1.3 - 2026-XX-XX
+v0.2.0 - 2026-XX-XX
 -------------------
 
 - `honeysap/services/gateway/`: Significantly enhanced SAP RFC Gateway service.

@@ -17,7 +17,7 @@
 
 """
 HoneySAP - SAP low-interaction honeypot
-======================================
+=======================================
 
 HoneySAP is a low-interaction research-focused honeypot specific for SAP
 services. It's aimed at learn the techniques and motivations behind attacks
@@ -27,7 +27,10 @@ against SAP systems.
 
 """
 
-__version__ = '0.1.2.dev0'
+__title__ = 'honeysap'
+"""The title of the library"""
+
+__version__ = '0.2.0.dev0'
 """The version of honeysap"""
 
 __url__ = "https://owasp.org/www-project-core-business-application-security/"
@@ -36,5 +39,5 @@ __url__ = "https://owasp.org/www-project-core-business-application-security/"
 __repo__ = "https://github.com/OWASP/honeysap"
 """The URL for honeysap's repository"""
 
-__license__ = "GNU General Public License v2 or later (GPLv2+)"
+__license__ = "GPL-2.0-or-later"
 """The license governing the use and distribution of honeysap"""

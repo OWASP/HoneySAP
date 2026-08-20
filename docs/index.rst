@@ -36,7 +36,8 @@ documentation should contain the start point.
 .. toctree::
    :maxdepth: 2
 
-   dev/development
+   dev/index
+   api/index
 
 
 Indices and tables

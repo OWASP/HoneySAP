@@ -17,7 +17,7 @@ Installing honeysap is simple with pip, after checking out the code, just run th
     python -m pip install .
 
 
-Ubuntu 18.04
+Ubuntu 24.04
 ------------
 
 First step would be to install system packages that are required::
@@ -29,8 +29,8 @@ After having all the system packages ready, you can proceed to install HoneySAP:
    cd /opt
    git clone https://github.com/OWASP/honeysap
    cd honeysap
-   sudo python -m pip install .
+   python -m pip install .
 
 The honeypot is then ready for being run::
 
-   /usr/local/bin/honeysap --config-file /opt/honeysap/honeysap.yml
+   /opt/honeysap/bin/honeysap --config-file /opt/honeysap/honeysap.yml
