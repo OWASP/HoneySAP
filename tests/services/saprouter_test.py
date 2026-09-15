@@ -17,8 +17,6 @@
 
 # Standard imports
 import unittest
-# External imports
-from six.moves import range
 # Custom imports
 from honeysap.services.saprouter.routetable import RouteTable
 
