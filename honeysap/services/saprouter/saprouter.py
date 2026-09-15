@@ -42,8 +42,9 @@ from .routetable import RouteTable
 from .error_profiles import (resolve_error_profile, render_error_options)
 
 
-def unix_time(dt):
-    return int((dt - datetime(1970, 1, 1)).total_seconds())
+def saprouter_time(dt):
+    """Encode the router's epoch offset, not a plain Unix timestamp."""
+    return int((dt - datetime(1970, 1, 1)).total_seconds()) - 1000000000
 
 
 class SAPRouterClient(Loggeable, SAPNIClient):
@@ -227,18 +228,20 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
         self.logger.debug("Handling routed message")
         client = self.server.clients[self.client_address]
         target = client.target_service
+        target_server = getattr(target, "server", None)
         if client.talk_mode == ROUTER_TALK_MODE_NI_MSG_IO:
             # The virtual NI service must receive complete framed packets,
             # decoded using its own protocol instead of SAPRouter.
             stream_socket = SAPNIStreamSocket(self.request.ins,
-                                              keep_alive=target.server.keep_alive,
-                                              base_cls=target.server.base_cls,
+                                              keep_alive=getattr(target_server, "keep_alive",
+                                                                 self.request.keep_alive),
+                                              base_cls=getattr(target_server, "base_cls", None),
                                               timeout=self.request.timeout,
                                               max_frame_length=self.request.max_frame_length)
         else:
             # Native talk mode intentionally bypasses NI framing.
             stream_socket = StreamSocket(self.request.ins,
-                                         target.server.base_cls or Raw)
+                                         getattr(target_server, "base_cls", None) or Raw)
         target.handle_virtual(stream_socket, self.client_address)
 
     def handle_route(self, pkt):
@@ -461,6 +464,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
 
         self.logger.debug("Unhandled command %d (%s)",
                           pkt.adm_command, command_name)
+        return self.emit_profile_error("admin_denied")
 
     def handle_timeout(self):
         """Handles timeout"""
@@ -497,7 +501,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
             if client.routed:
                 info_client.partner = client.partner
                 info_client.service = client.service
-            info_client.connected_on = unix_time(client.connected_on)
+            info_client.connected_on = saprouter_time(client.connected_on)
 
             info_client.flag_traced = client.traced
             info_client.flag_routed = client.routed
@@ -514,7 +518,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
 
         info_pkt = SAPRouterInfoServer(pid=self.pid,
                                        ppid=self.parent_pid,
-                                       started_on=unix_time(self.time_started),
+                                       started_on=saprouter_time(self.time_started),
                                        port=server_port,
                                        pport=self.parent_port)
         hexdump(info_pkt)
@@ -628,29 +632,3 @@ class SAPRouterService(BaseTCPService):
         # Generates a random pid and records the time when the service started
         self.server.pid = self.server.config.get("pid", 0)
         self.server.time_started = self.server.config.get("time_started", datetime.today())
-
-        # Register virtual services from the route table as synthetic clients
-        # so they appear in info responses, mimicking a real SAP Router that
-        # shows its backend connections in the connection table.
-        self._register_virtual_clients()
-
-    def _register_virtual_clients(self):
-        """Register synthetic client entries for allowed targets in the route
-        table, so they appear in the router's info response as connected
-        backend services."""
-        if not hasattr(self.server.route_table, 'table'):
-            return
-        for (host, port), (action, talk_mode, password) in self.server.route_table.table.items():
-            if action != RouteTable.ROUTE_ALLOW:
-                continue
-            self.server.clients_count += 1
-            client_key = (host, port)
-            client = SAPRouterClient()
-            client.id = self.server.clients_count
-            client.address = self.listener_address
-            client.partner = host
-            client.service = str(port)
-            client.routed = True
-            client.connected = True
-            client.connected_on = self.server.time_started
-            self.server.clients[client_key] = client

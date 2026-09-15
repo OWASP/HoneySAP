@@ -171,11 +171,15 @@ With:
     <action> := allow | deny
     <talk_mode> := raw | ni | any
 
-Target port accepts a range of ports to use. Target address accepts network
-ranges as per ``nmap``'s syntaxis if the ``netaddr`` library is present.
+Target port accepts a port range. Target address accepts an individual IPv4
+address, a CIDR network, or SAProuter-style IPv4 wildcards such as
+``127.0.0.*``. Matching is evaluated against the ordered rules; a large
+network or port range does not create connected clients or require every
+address/port pair to be materialized.
 
-First matching entry takes precedence and only one action/mode is allowed per IP/port
-pair.
+The first matching entry takes precedence. A permitted target still needs a
+reachable listener: for a virtual target, a ``ForwarderService`` can supply a
+raw TCP backend without exposing its own listener.
 
 ``route_table_filename``:
 

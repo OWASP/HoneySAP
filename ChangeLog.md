@@ -15,6 +15,10 @@ v0.2.0.dev0 (unreleased)
     invalid-service, and oversized-request branches with configurable errors;
     prevented uncaught route-port conversion errors and unintended DNS lookups.
   - Made SAPRouter NI request-size and unknown-packet behavior profile settings.
+  - Matched ordered CIDR and SAProuter-style wildcard route rules without
+    expanding large tables into connected clients; enabled raw virtual
+    Forwarder handoff, corrected information timestamps, and denied unsupported
+    remote-admin commands.
 - Hardened configuration includes: relative and nested JSON/YAML includes,
   cycle detection, and non-mutating option lookup.
 - Improved feed, session, event, datastore, and eater cleanup and concurrency;

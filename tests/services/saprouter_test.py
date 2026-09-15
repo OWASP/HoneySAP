@@ -17,6 +17,7 @@
 
 # Standard imports
 import unittest
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -24,20 +25,28 @@ from scapy.packet import Raw
 from pysap.SAPNI import SAPNI, SAPNIStreamSocket
 from pysap.SAPMS import SAPMS
 from pysap.SAPRouter import SAPRouter, SAPRouterRouteHop
+from pysap.utils.fields import saptimestamp_to_datetime
 # Custom imports
 from honeysap.core.config import Configuration, ConfigurationYAMLParser
 from honeysap.services.saprouter.error_profiles import (
     DEFAULT_ERROR_PROFILE_916, TEMPLATE_CONTEXT, render_error_options,
     resolve_error_profile)
 from honeysap.services.saprouter.routetable import RouteTable
+from honeysap.services.forwarder import ForwarderService
 from honeysap.services.saprouter.saprouter import (SAPRouterService,
-                                                  SAPRouterServerHandler)
+                                                  SAPRouterServerHandler,
+                                                  saprouter_time)
 
 
 # TODO: Add tests on netaddr network range parsing
 
 
 class SAPRouterTest(unittest.TestCase):
+
+    def test_info_timestamp_uses_router_epoch(self):
+        started = datetime(2026, 9, 15, 12, 34, 56)
+        self.assertEqual(saptimestamp_to_datetime(saprouter_time(started)),
+                         started)
 
     def test_916_default_and_legacy_release_profiles(self):
         modern = resolve_error_profile(916)
@@ -139,6 +148,18 @@ class SAPRouterTest(unittest.TestCase):
         resolved = resolve_error_profile(service.get("release"),
                                          service.get("error_profile"))
         self.assertEqual(resolved, DEFAULT_ERROR_PROFILE_916)
+
+    def test_permissions_do_not_create_connected_info_clients(self):
+        config = Configuration({"virtual": True, "release": 916,
+                                "route_table": ["allow,any,127.0.0.*,3600,"]})
+        service = SAPRouterService(config, Mock(), Mock(), Mock())
+        try:
+            self.assertEqual(service.server.clients, {})
+            self.assertEqual(service.server.clients_count, 0)
+            self.assertEqual(service.server.route_table.lookup_target(
+                "127.0.0.2", 3600)[0], RouteTable.ROUTE_ALLOW)
+        finally:
+            service.stop()
 
 
 class RouteTableTest(unittest.TestCase):
@@ -247,6 +268,52 @@ class RouteTableTest(unittest.TestCase):
         self.assertEqual({("10.0.0.1", 3200):
                           (RouteTable.ROUTE_ALLOW, RouteTable.MODE_NI, None)},
                          routetable.table)
+
+    def test_wildcard_subnet_rules_are_ordered_like_real_router(self):
+        rules = ["deny,any,127.0.0.1,3600,",
+                 "allow,any,127.0.0.*,3600,",
+                 "allow,raw,127.0.0.3,3700,testpass"]
+        table = RouteTable(rules)
+        self.assertEqual(table.lookup_target("127.0.0.1", 3600),
+                         (RouteTable.ROUTE_DENY, RouteTable.MODE_ANY, None))
+        self.assertEqual(table.lookup_target("127.0.0.2", 3600),
+                         (RouteTable.ROUTE_ALLOW, RouteTable.MODE_ANY, None))
+        self.assertEqual(table.lookup_target("127.0.0.4", 3600),
+                         (RouteTable.ROUTE_ALLOW, RouteTable.MODE_ANY, None))
+        self.assertEqual(table.lookup_target("127.0.1.2", 3600),
+                         (RouteTable.ROUTE_DENY, RouteTable.MODE_ANY, None))
+        self.assertEqual(table.lookup_target("127.0.0.3", 3700),
+                         (RouteTable.ROUTE_ALLOW, RouteTable.MODE_RAW, "testpass"))
+        self.assertEqual(table.table[("127.0.0.1", 3600)][0], RouteTable.ROUTE_DENY)
+
+        reversed_rules = RouteTable(["allow,any,127.0.0.*,3600,",
+                                     "deny,any,127.0.0.1,3600,"])
+        self.assertEqual(reversed_rules.lookup_target("127.0.0.1", 3600)[0],
+                         RouteTable.ROUTE_ALLOW)
+
+    def test_large_network_and_port_range_match_without_expansion(self):
+        table = RouteTable(["allow,any,10.*.*.*,3200-65535,",
+                            "deny,any,10.2.3.4,3200,"])
+        self.assertEqual(len(table.table), 1)
+        self.assertEqual(table.lookup_target("10.2.3.4", 3200)[0],
+                         RouteTable.ROUTE_ALLOW)
+        self.assertEqual(table.lookup_target("10.2.3.4", 3199)[0],
+                         RouteTable.ROUTE_DENY)
+        self.assertEqual(table.lookup_target("11.2.3.4", 3200)[0],
+                         RouteTable.ROUTE_DENY)
+
+        cidr = RouteTable(["allow,ni,10.0.0.0/8,3200,"])
+        self.assertEqual(cidr.table, {})
+        self.assertEqual(cidr.lookup_target("10.2.3.4", 3200)[0],
+                         RouteTable.ROUTE_ALLOW)
+
+    def test_invalid_wildcard_does_not_abort_later_rules(self):
+        table = RouteTable(["allow,any,127.0.0.1-999,3200,",
+                            "allow,any,127.0.0.2,3200,"])
+        self.assertEqual(table.lookup_target("127.0.0.2", 3200)[0],
+                         RouteTable.ROUTE_ALLOW)
+        self.assertEqual(table.lookup_target("127.0.0.3", 3200)[0],
+                         RouteTable.ROUTE_DENY)
 
     def test_lookup_target(self):
         """Test look up of a target in the table"""
@@ -530,6 +597,20 @@ class SAPRouterHandlerTest(unittest.TestCase):
         self.assertEqual(response.err_text_value.error,
                          b"Admin from remote denied")
 
+    def test_router_enabled_external_admin_denies_unimplemented_commands(self):
+        handler = self.make_router_handler()
+        handler.config.update({"external_admin": True})
+        for command in (3, 4, 14, 99):
+            with self.subTest(command=command):
+                handler.request.send.reset_mock()
+                handler.handle_admin(SAPRouter(type=SAPRouter.SAPROUTER_ADMIN,
+                                               version=40,
+                                               adm_command=command))
+                response = handler.request.send.call_args.args[0]
+                self.assertEqual(response.return_code, -94)
+                self.assertEqual(response.err_text_value.error,
+                                 b"Admin from remote denied")
+
     def test_router_916_invalid_route_metadata_precedes_table_denial(self):
         hops = [SAPRouterRouteHop(hostname="127.0.0.1", port="3299"),
                 SAPRouterRouteHop(hostname="127.0.0.1", port="3200")]
@@ -677,6 +758,18 @@ class SAPRouterHandlerTest(unittest.TestCase):
         self.assertIs(stream.basecls, SAPMS)
         self.assertTrue(stream.keep_alive)
         self.assertEqual(stream.max_frame_length, 4096)
+        self.assertEqual(address, handler.client_address)
+
+    def test_router_raw_handoff_accepts_virtual_forwarder_without_server(self):
+        handler = self.make_router_handler()
+        target = ForwarderService.__new__(ForwarderService)
+        target.handle_virtual = Mock()
+        client = handler.server.clients[handler.client_address]
+        client.talk_mode = RouteTable.MODE_RAW
+        client.target_service = target
+        handler.handle_routed()
+        stream, address = target.handle_virtual.call_args.args
+        self.assertIs(stream.basecls, Raw)
         self.assertEqual(address, handler.client_address)
 
     def test_router_virtual_ni_clean_close_is_not_a_handler_error(self):
