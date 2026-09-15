@@ -17,6 +17,8 @@
 
 # Standard imports
 from datetime import datetime
+from ipaddress import ip_address
+from string import Template
 # External imports
 from scapy.packet import Raw
 from scapy.utils import hexdump
@@ -24,8 +26,10 @@ from scapy.supersocket import StreamSocket
 
 from gevent.timeout import Timeout
 
-from pysap.SAPNI import SAPNIServerThreaded, SAPNIServerHandler, SAPNIClient
+from pysap.SAPNI import (SAPNI, SAPNIStreamSocket, SAPNIServerThreaded,
+                         SAPNIServerHandler, SAPNIClient)
 from pysap.SAPRouter import (SAPRouter, SAPRouterError, SAPRouterInfoClient,
+                             ROUTER_TALK_MODE_NI_MSG_IO,
                              router_is_control, router_is_admin,
                              router_is_known_type, router_control_opcodes,
                              router_adm_commands, router_return_codes,
@@ -35,6 +39,7 @@ from honeysap.core.logger import Loggeable
 from honeysap.core.service import BaseTCPService
 
 from .routetable import RouteTable
+from .error_profiles import (resolve_error_profile, render_error_options)
 
 
 def unix_time(dt):
@@ -67,15 +72,26 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
 
     @property
     def release(self):
-        return self.config.get("release", 721)
+        return int(self.config.get("release", 916))
 
     @property
     def router_version(self):
-        return self.config.get("router_version", 40)
+        return int(self.config.get("router_version", 40))
 
     @property
     def router_version_patch(self):
-        return self.config.get("router_version_patch", 4)
+        return int(self.config.get("router_version_patch",
+                                   7 if self.release == 916 else 4))
+
+    @property
+    def error_profile(self):
+        return getattr(self.server, "error_profile", None) or resolve_error_profile(
+            self.release, self.config.get("error_profile", None))
+
+    @property
+    def partner_name_mode(self):
+        return self.config.get("partner_name_mode",
+                               self.error_profile["partner_name_mode"])
 
     @property
     def info_password(self):
@@ -162,7 +178,10 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
                     # Pass the control to the handle_data function
                     self.handle_data()
 
-        except OSError:
+        # Scapy raises EOFError for a clean peer close. Older installed pysap
+        # releases do not consume it in virtual NI handlers, so the router
+        # must also treat it as a normal routed-client disconnect.
+        except (OSError, EOFError):
             self.logger.debug("Client %s disconnected", self.client_address)
 
         except Timeout as t:
@@ -179,9 +198,20 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
         """Handles a received packet"""
         self.session.add_event("Received packet", request=str(self.packet))
 
+        packet_length = (len(bytes(self.packet.payload)) if SAPNI in self.packet
+                         else len(bytes(self.packet)))
+        limit = self.error_profile["max_request_length"]
+        if limit is not None and packet_length > limit:
+            self.logger.debug("Oversized SAPRouter request (%d bytes)", packet_length)
+            self.session.add_event("Invalid SAPRouter packet")
+            self.close()
+            return
+
         if SAPRouter not in self.packet or not router_is_known_type(self.packet):
             self.logger.debug("Invalid packet sent to SAPRouter")
             self.session.add_event("Invalid SAPRouter packet")
+            if self.error_profile["unknown_packet_error"]:
+                self.emit_profile_error("route_expected")
             return
 
         router = self.packet[SAPRouter]
@@ -195,16 +225,21 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
     def handle_routed(self):
         """Handles a packet for an already routed client."""
         self.logger.debug("Handling routed message")
-
-        # We create a new raw StreamSocket for passing it to the virtual
-        # service. The SAP router service should take care of the NI layer
-        # and perform the reassembling, keep alive, etc.
-        stream_socket = StreamSocket(self.request.ins)
-
-        # Now handle the virtual service, from now on the virtual service
-        # would take care of this client
-        self.server.clients[self.client_address].target_service.handle_virtual(stream_socket,
-                                                                               self.client_address)
+        client = self.server.clients[self.client_address]
+        target = client.target_service
+        if client.talk_mode == ROUTER_TALK_MODE_NI_MSG_IO:
+            # The virtual NI service must receive complete framed packets,
+            # decoded using its own protocol instead of SAPRouter.
+            stream_socket = SAPNIStreamSocket(self.request.ins,
+                                              keep_alive=target.server.keep_alive,
+                                              base_cls=target.server.base_cls,
+                                              timeout=self.request.timeout,
+                                              max_frame_length=self.request.max_frame_length)
+        else:
+            # Native talk mode intentionally bypasses NI framing.
+            stream_socket = StreamSocket(self.request.ins,
+                                         target.server.base_cls or Raw)
+        target.handle_virtual(stream_socket, self.client_address)
 
     def handle_route(self, pkt):
         """Handles route messages"""
@@ -215,77 +250,82 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
             self.route_request(pkt)
 
     def check_route(self, pkt):
-        """Checks if a route request is valid.
+        """Reject malformed route metadata before destination lookup.
+
+        The default line values are observed on SAPRouter 9.16-100.
         """
-
-        # Check the route NI version
-        if pkt.route_ni_version > self.router_version:
-            self.logger.debug("Route request version greater")
-            # TODO: Check if we need to return an error
-
-        # Cehck the number of routes
-        if len(pkt.route_string) <= 0:
-            self.logger.debug("Invalid number of routes in route request")
-            # TODO: Check if we need to return an error
-
-        # Check the number of entries
-        if pkt.route_entries < 2 and pkt.route_entries != len(pkt.route_string):
-            self.logger.debug("Invalid number of entries in route request")
-            # TODO: Check if we need to return an error
-
-        # Check the number of remaining entries
+        hops = pkt.route_string or []
+        if pkt.route_length and not hops:
+            return self.invalid_route("missing_route_bytes")
+        if hops and (sum(len(hop) for hop in hops) != pkt.route_length or
+                     len(bytes(pkt.payload)) > 0):
+            return self.invalid_route("bad_length")
+        if not hops:
+            return self.invalid_route("no_hops")
+        if pkt.route_entries < 2 or pkt.route_entries != len(hops):
+            return self.invalid_route("bad_entries")
         if pkt.route_rest_nodes >= pkt.route_entries:
-            self.logger.debug("Invalid route rest nodes number")
-            # TODO: Check if we need to return an error
-
-        # Check the offset value against the length
-        if pkt.route_offset >= pkt.route_length:
-            self.logger.debug("Invalid route string offset")
-            # TODO: Check if we need to return an error
-
-        # Check the offset value against the remaining hops
-        actual_offset = sum([len(x) for x in pkt.route_string[:pkt.route_rest_nodes]])
-        if pkt.route_offset != actual_offset:
-            self.logger.debug("Invalid route string offset")
-            # TODO: Check if we need to return an error
-
-        # Check that the first hop is the SAP Router
-        first_hop = pkt.route_string[0]
-        if first_hop.hostname != self.server.listener_address or \
-           first_hop.port != self.server.listener_port:
-            self.logger.debug("Invalid first hop in route string")
-            # TODO: Check if we need to return an error
-
+            return self.invalid_route("bad_rest")
+        actual_offset = sum(len(hop) for hop in hops[:pkt.route_rest_nodes])
+        if (pkt.route_offset >= pkt.route_length or
+                pkt.route_offset != actual_offset):
+            return self.invalid_route("bad_offset")
+        if pkt.route_ni_version == 0:
+            self.emit_profile_error("route_version_old",
+                                    route_ni_version=pkt.route_ni_version)
+            return False
         return True
+
+    def invalid_route(self, reason):
+        """Send an invalid-route error and stop routing."""
+        self.emit_profile_error("invalid_route", reason=reason)
+        return False
 
     def route_request(self, pkt):
         """Perform a lookup on the route table and routes the packet accordingly
         if allowed.
         """
         route_string = pkt.route_string[pkt.route_rest_nodes]
-        (action, talk_mode, password) = self.server.route_table.lookup_target(route_string.hostname,
-                                                                              int(route_string.port))
+        target_host = (route_string.hostname.decode("utf-8", errors="replace")
+                       if isinstance(route_string.hostname, bytes) else route_string.hostname)
+        if not target_host:
+            self.emit_profile_error("host_empty")
+            return
+        try:
+            target_port = int(route_string.port)
+        except (TypeError, ValueError):
+            # Do not resolve arbitrary route destinations from a honeypot.
+            # A non-IP hostname without a numeric service follows the 9.16
+            # unknown-host path; other invalid services receive a bounded
+            # error instead of unwinding the handler thread.
+            try:
+                ip_address(target_host)
+            except ValueError:
+                self.emit_profile_error("host_unknown", target_host=target_host)
+            else:
+                self.emit_profile_error("service_invalid",
+                                        target_port=route_string.port)
+            return
+        route_password = (route_string.password.decode("utf-8", errors="replace")
+                          if isinstance(route_string.password, bytes) else route_string.password)
+        (action, talk_mode, password) = self.server.route_table.lookup_target(target_host,
+                                                                              target_port)
 
         if action == RouteTable.ROUTE_DENY:
-            self.logger.debug("Route to %s:%s denied" % (route_string.hostname,
-                                                         route_string.port))
-            self.return_error(return_code=-94,
-                              error="%s: route permission denied (%s to %s, %s)" % (self.hostname,
-                                                                                    self.server.listener_address,
-                                                                                    route_string.hostname,
-                                                                                    route_string.port))
+            self.logger.debug("Route to %s:%s denied" % (target_host, target_port))
+            self.deny_route(target_host, target_port)
             return
 
         elif talk_mode != RouteTable.MODE_ANY and talk_mode != pkt.route_talk_mode:
             self.logger.debug("Talk mode (%d) to %s:%s denied" % (pkt.route_talk_mode,
                                                                   route_string.hostname,
                                                                   route_string.port))
-            self.return_error(return_code=2)  # TODO: Return the proper error
+            self.deny_route(target_host, target_port)
             return
 
         elif action == RouteTable.ROUTE_ALLOW:
             if password:
-                if password == route_string.password:
+                if password == route_password:
                     self.logger.debug("Valid password for route to %s:%s" % (route_string.hostname,
                                                                              route_string.port))
                     self.session.add_event("Route request allowed, valid password", data={"target_host": route_string.hostname,
@@ -300,7 +340,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
                                                                                             "target_port": route_string.port,
                                                                                             "password": route_string.password},
                                            request=str(pkt))
-                    self.return_error(return_code=3)  # TODO: Return the proper error
+                    self.deny_route(target_host, target_port)
                     return
 
             else:
@@ -313,19 +353,33 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
 
         # The route is accepted, now look the service for the target address/port
         # and register it as routed
-        service = self.server.service_manager.find_service_by_address(route_string.hostname,
-                                                                      int(route_string.port))
+        service = self.server.service_manager.find_service_by_address(target_host,
+                                                                      target_port)
 
         # If the service wasn't found, we should return a timeout message,
         # meaning that the SAP Router tried to connect to the target service
         # but it didn't responded
         if service is None:
-            self.logger.debug("Target service %s:%s not available" % (route_string.hostname,
-                                                                      route_string.port))
-            self.session.add_event("Target service not available", data={"target": route_string.hostname,
-                                                                         "port": route_string.port,
-                                                                         "password": route_string.password},
+            self.logger.debug("Target service %s:%s not available", target_host,
+                              target_port)
+            self.session.add_event("Target service not available", data={"target": target_host,
+                                                                         "port": target_port,
+                                                                         "password": route_password},
                                    request=str(pkt))
+            if pkt.route_talk_mode == RouteTable.MODE_RAW:
+                # 9.16 acknowledges an allowed native/raw route first, then
+                # closes the stream when the local partner is unavailable.
+                self.advance_profile_count("raw_unreachable_step")
+                self.request.send(SAPRouter(type=SAPRouter.SAPROUTER_PONG))
+                self.close()
+                return
+            partner_host = ("localhost" if (self.partner_name_mode == "loopback" and
+                                            target_host == "127.0.0.1")
+                            else target_host)
+            self.emit_profile_error("partner_unreachable", target_host=target_host,
+                                    target_port=target_port,
+                                    partner_host=partner_host)
+            return
 
         else:
             self.logger.debug("Target service %s:%s found, registering and routing" % (route_string.hostname,
@@ -344,7 +398,13 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
             self.server.clients[self.client_address].service = int(route_string.port)
 
             # Send a PONG message to notify the client the route was accepted
+            self.advance_profile_count("route_accept_step")
             self.request.send(SAPRouter(type=SAPRouter.SAPROUTER_PONG))
+
+    def deny_route(self, target_host, target_port):
+        """Reply with a route-permission error for a denied destination."""
+        self.emit_profile_error("route_denied", target_host=target_host,
+                                target_port=target_port)
 
     def handle_control(self, pkt):
         """Handles control messages"""
@@ -355,6 +415,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
         if pkt.opcode == 1:
             self.logger.debug("Received version request (client version %d)", pkt.version)
             self.server.clients[self.client_address].ni_version = pkt.version
+            self.advance_profile_count("version_request_step")
             self.request.send(SAPRouter(type=SAPRouter.SAPROUTER_CONTROL,
                                         version=self.router_version,
                                         opcode=2,
@@ -362,20 +423,19 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
         else:
             self.logger.debug("Unhandled opcode %d (%s)",
                               pkt.opcode, opcode_str)
-            return self.return_error(return_code=-13,
-                                     error="invalid client version",
-                                     detail="NiBufIProcMsg: unknown opcode 3 received")
+            return self.emit_profile_error("control_unknown", opcode=pkt.opcode)
 
     def handle_admin(self, pkt):
         """Handles admin messages"""
+        command_name = router_adm_commands.get(pkt.adm_command, "unknown")
         self.logger.debug("Handling admin message, command %d (%s)",
-                          pkt.adm_command,
-                          router_adm_commands[pkt.adm_command])
+                          pkt.adm_command, command_name)
 
         if not self.external_admin:
             self.logger.debug("External administration disabled")
-            return self.return_error(return_code=-94,
-                                     error="Admin from remote denied")
+            if pkt.adm_command == 2:
+                return self.emit_profile_error("admin_info_denied")
+            return self.emit_profile_error("admin_denied")
 
         # Information request
         if pkt.adm_command == 2:
@@ -384,8 +444,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
             # If a password was specified but doesn't match, return error
             if self.info_password and self.info_password != pkt.adm_password.strip(b"\x00").decode():
                 self.session.add_event("Information request invalid password", data=pkt.adm_password, request=str(self.packet))
-                return self.return_error(return_code=-94,
-                                         error="route denied")
+                return self.emit_profile_error("admin_password_denied")
             else:
                 self.session.add_event("Information request valid password", data=pkt.adm_password, request=str(self.packet))
                 return self.return_info()
@@ -401,15 +460,31 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
                 return
 
         self.logger.debug("Unhandled command %d (%s)",
-                          pkt.adm_command,
-                          router_adm_commands[pkt.adm_command])
+                          pkt.adm_command, command_name)
 
     def handle_timeout(self):
         """Handles timeout"""
         self.logger.debug("Timed out client")
-        self.return_error(return_code=-5,
-                          error="connection timed out",
-                          detail="RTPENDLIST::timeoutPend: no route received within %ds (CONNECTED)" % self.timeout)
+        self.emit_profile_error("timeout")
+
+    def error_context(self, **values):
+        """Values available to profile text templates."""
+        context = {"hostname": self.hostname, "release": self.release,
+                   "router_version": self.router_version,
+                   "router_version_patch": self.router_version_patch,
+                   "peer_ip": self.client_address[0],
+                   "listener_port": self.server.listener_port,
+                   "timeout": self.timeout,
+                   "target_host": "", "target_port": "",
+                   "partner_host": "", "opcode": ""}
+        context.update(values)
+        return {key: str(value) for key, value in context.items()}
+
+    def emit_profile_error(self, case, reason=None, **values):
+        """Return a named version/profile-specific SAPRouter error."""
+        options = render_error_options(self.error_profile, case,
+                                       self.error_context(**values), reason)
+        return self.return_error(**options)
 
     def return_info(self):
         """Returns an information request response"""
@@ -471,15 +546,21 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
 
     def return_error(self, **options):
         """Returns an error response"""
+        profile = self.error_profile
+        count_step = options.pop("count_step",
+                                 profile["error_count"]["default_error_step"])
+        count_after = options.pop("count_after", 0)
+        if profile["error_count"]["enabled"]:
+            options.setdefault("error_count", self.advance_error_count(count_step))
         self.logger.debug("Returning error code %d (%s)", options.get("return_code"),
-                          router_return_codes[options.get("return_code")])
+                          router_return_codes.get(options.get("return_code"), "unknown"))
 
-        error_text = SAPRouterError(release=str(self.release),
-                                    version=str(self.router_version),
-                                    error_time=datetime.now().strftime(SAPRouterError.time_format),
-                                    location="SAPRouter %d.%d on '%s'" % (self.router_version,
-                                                                          self.router_version_patch,
-                                                                          self.hostname))
+        context = self.error_context()
+        fields = {key: Template(str(value)).substitute(context)
+                  for key, value in profile["fields"].items()}
+        fields.setdefault("error_time", datetime.now().strftime(
+            str(profile["error_time_format"])))
+        error_text = SAPRouterError(**fields)
         for field in list(options.keys()):
             setattr(error_text, field, str(options[field]))
 
@@ -491,8 +572,23 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
         self.request.send(error_pkt)
         self.session.add_event("Returned error",
                                data={"return_code": options.get("return_code"),
-                                     "error_msg": router_return_codes[options.get("return_code")]},
+                                     "error_msg": router_return_codes.get(options.get("return_code"), "unknown")},
                                response=str(error_pkt))
+        if profile["error_count"]["enabled"] and count_after:
+            self.advance_error_count(count_after)
+
+    def advance_error_count(self, step):
+        """Advance the configured process-level NI error serial."""
+        current = getattr(self.server, "error_count",
+                          int(self.error_profile["error_count"]["start"]))
+        self.server.error_count = current + step
+        return self.server.error_count
+
+    def advance_profile_count(self, event):
+        """Advance a named non-error exchange when its profile enables NI serials."""
+        count = self.error_profile["error_count"]
+        if count["enabled"]:
+            return self.advance_error_count(int(count[event]))
 
 
 class SAPRouterServerThreaded(Loggeable, SAPNIServerThreaded):
@@ -515,7 +611,17 @@ class SAPRouterService(BaseTCPService):
     handler_cls = SAPRouterServerHandler
 
     def setup_server(self):
+        error_profile = resolve_error_profile(
+            int(self.config.get("release", 916)),
+            self.config.get("error_profile", None))
+        error_count_start = int(self.config.get(
+            "error_count_start", error_profile["error_count"]["start"]))
+        if error_count_start < 0:
+            raise ValueError("error_count_start must be nonnegative")
         super(SAPRouterService, self).setup_server()
+        self.server.error_profile = error_profile
+        if self.server.error_profile["error_count"]["enabled"]:
+            self.server.error_count = error_count_start
         self.server.route_table = RouteTable(self.config.get("route_table", None))
         self.server.listener_port = self.listener_port
         self.server.listener_address = self.listener_address

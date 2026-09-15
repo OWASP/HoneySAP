@@ -133,7 +133,10 @@ class RouteTable(Loggeable):
                 continue
             for port in ports:
                 for (host, port) in self.parse_target_hosts(target, port):
-                    self.table[(host, port)] = (action, talk_mode, password)
+                    # SAPRouter uses the first matching permission line.
+                    # Preserve that ordering after expanding host/port ranges.
+                    self.table.setdefault((host, port),
+                                          (action, talk_mode, password))
 
         self.logger.debug("Using route table: %s" % self.table)
 

@@ -1,8 +1,8 @@
 # Keep local checkout state and build outputs out of COPY . and the build context.
 .git/
 .github/
-.maestro/
 .venv/
+.vscode/
 .vagrant/
 .pytest_cache/
 __pycache__/
@@ -21,6 +21,7 @@ logs/
 *.pcap
 *.pcapng
 *.core
+uv.lock
 
 # Only bundled pysap source archives are needed by the optional offline path.
 pysap/**

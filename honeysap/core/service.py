@@ -149,8 +149,9 @@ class BaseTCPService(BaseService):
     def handle_virtual(self, client, client_address):
         """Handle virtual requests by creating a handler and passing to it the
         client socket and address."""
-        handler = self.handler_cls(client, client_address, self.server)
-        handler.handle()
+        # BaseRequestHandler.__init__ already calls setup(), handle(), and
+        # finish(); calling handle() again reads a closed client socket.
+        self.handler_cls(client, client_address, self.server)
 
 
 class BaseHTTPService(BaseService):

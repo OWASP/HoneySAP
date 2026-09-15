@@ -4,6 +4,17 @@ Changelog
 v0.2.0.dev0 (unreleased)
 -------------------
 
+- `honeysap/services/saprouter`: Significantly enhanced SAP Router services.
+  - Improved SAPRouter control, route validation, timeout, denial, and
+    permitted-target replies, including NI-framed virtual-service handoff and
+    process-dynamic error counters and clean routed-client shutdown with older
+    pysap releases. Version-specific error text, metadata, and counter steps
+    can now be overridden per service with `error_profile`, with a default
+    profile for SAPRouter version 9.16.
+  - Matched the newest malformed-route length, old-version, empty/unknown host,
+    invalid-service, and oversized-request branches with configurable errors;
+    prevented uncaught route-port conversion errors and unintended DNS lookups.
+  - Made SAPRouter NI request-size and unknown-packet behavior profile settings.
 - Hardened configuration includes: relative and nested JSON/YAML includes,
   cycle detection, and non-mutating option lookup.
 - Improved feed, session, event, datastore, and eater cleanup and concurrency;

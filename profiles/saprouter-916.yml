@@ -1,0 +1,128 @@
+# Standalone SAPRouter 9.16-compatible honeypot profile.
+# Empty route_table means deny by default; no backend is contacted.
+verbose: 0
+verbose_all: false
+colored_console: false
+datastore_class: MemoryDataStore
+services:
+  - service: SAPRouterService
+    enabled: true
+    listener_address: 0.0.0.0
+    listener_port: 3299
+    hostname: saprouter
+    release: 916
+    router_version: 40
+    router_version_patch: 7
+    external_admin: false
+    timeout: 5
+    route_table: []
+    # This complete error profile equals the built-in 9.16 default. Copy and
+    # adjust only the observed fields when emulating a different build.
+    error_profile:
+      fields:
+        counter: "1"
+        component: "NI (network interface)"
+        release: "$release"
+        version: "$router_version"
+        module: ""
+        location: "SAProuter $router_version.$router_version_patch on '$hostname'"
+      error_time_format: "%a %b %d %H:%M:%S %Y"
+      partner_name_mode: literal
+      max_request_length: 10024
+      unknown_packet_error: true
+      error_count:
+        enabled: true
+        start: 1
+        default_error_step: 2
+        version_request_step: 5
+        route_accept_step: 5
+        raw_unreachable_step: 4
+      errors:
+        invalid_route:
+          return_code: -93
+          error: "internal error"
+          detail: "NiRRouteRepl: invalid route received"
+          module: "/bas/916_REL/src/base/ni/nirout.cpp"
+          line_by_reason:
+            no_hops: "3997"
+            missing_route_bytes: "3963"
+            bad_length: "4004"
+            bad_entries: "4032"
+            bad_offset: "4040"
+            bad_rest: "4061"
+          count_step: 2
+        route_version_old:
+          return_code: -96
+          error: "invalid client version"
+          detail: "NiRExRouteCon: version $route_ni_version too old"
+          module: "/bas/916_REL/src/base/ni/nirout.cpp"
+          line: "4180"
+          count_step: 2
+        host_empty:
+          return_code: -90
+          error: "hostname '' unknown"
+          detail: "NiHL6GetNodeAddr: hostname empty"
+          module: "/bas/916_REL/src/base/ni/nixxhl6.cpp"
+          line: "219"
+          count_step: 2
+        host_unknown:
+          return_code: -90
+          error: "hostname '$target_host' unknown"
+          detail: "NiPGetHostByName: '$target_host' not found"
+          module: "niuxi.c"
+          line: "1890"
+          system_call: "getaddrinfo"
+          count_step: 2
+        service_invalid:
+          return_code: -91
+          error: "service '$target_port' unknown"
+          count_step: 2
+        route_expected:
+          return_code: -93
+          error: "internal error"
+          detail: "NiRClientHandle: route expected"
+          module: "/bas/916_REL/src/base/ni/nirout.cpp"
+          line: "3825"
+          count_step: 2
+        route_denied:
+          return_code: -94
+          error: "$hostname: route permission denied ($peer_ip to $target_host, $target_port)"
+          detail: "H<1>"
+          count_step: 3
+        partner_unreachable:
+          return_code: -92
+          error: "partner '$partner_host:$target_port' not reached"
+          detail: "H<1> NiPConnect2: $target_host:$target_port"
+          module: "/bas/916_REL/src/base/ni/nixxi.cpp"
+          line: "3572"
+          system_call: "connect"
+          errorno: "111"
+          errorno_text: "Connection refused"
+          count_step: 4
+        control_unknown:
+          return_code: -13
+          error: "invalid client version"
+          detail: "NiBufIProcMsg: unknown opcode $opcode received"
+          module: "/bas/916_REL/src/base/ni/nibuf.cpp"
+          line: "2432"
+          count_step: 2
+          count_after: 3
+        admin_info_denied:
+          return_code: -99
+          error: "info access denied ($peer_ip to localhost, $listener_port)"
+          count_step: 2
+        admin_denied:
+          return_code: -94
+          error: "Admin from remote denied"
+          count_step: 2
+        admin_password_denied:
+          return_code: -94
+          error: "route denied"
+          count_step: 2
+        timeout:
+          return_code: -5
+          error: "connection timed out"
+          detail: "RTPENDLIST::timeoutPend: no route received within ${timeout}s (CONNECTED)"
+          module: "/bas/916_REL/src/base/ni/nirout.cpp"
+          line: "8897"
+          count_step: 2

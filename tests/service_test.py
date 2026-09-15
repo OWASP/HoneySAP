@@ -99,6 +99,17 @@ class ServiceManagerTest(unittest.TestCase):
         server.shutdown.assert_not_called()
         server.server_close.assert_called_once_with()
 
+    def test_virtual_tcp_handler_is_not_run_twice(self):
+        service = BaseTCPService.__new__(BaseTCPService)
+        service.handler_cls = Mock()
+        service.server = Mock()
+        client = Mock()
+        address = ("127.0.0.1", 50000)
+        service.handle_virtual(client, address)
+        service.handler_cls.assert_called_once_with(client, address,
+                                                    service.server)
+        service.handler_cls.return_value.handle.assert_not_called()
+
     def test_builtin_service_discovery_is_recursive_and_unique(self):
         names = [name for name, _ in ClassLoader([BaseService],
                                                   "honeysap/services").load()]
