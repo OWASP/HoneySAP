@@ -16,6 +16,7 @@
 #
 
 # Standard imports
+from html import escape
 from socket import timeout
 from socketserver import ThreadingMixIn
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -182,6 +183,7 @@ class SAPMSHTTPServerHandler(Loggeable, BaseHTTPRequestHandler):
                 self.requestline = ''
                 self.request_version = ''
                 self.command = ''
+                self.close_connection = 1
                 return
             if not self.raw_requestline:
                 self.close_connection = 1
@@ -217,11 +219,9 @@ class SAPMSHTTPServerHandler(Loggeable, BaseHTTPRequestHandler):
                                   self.path)
 
         try:
-            may_version, min_version = map(int, self.request_version.split("/", 2)[1].split(".", 2))
-        except Exception as e:
-            may_version, min_version = 1, 1
-
-        http_version = "HTTP/%d.%d" % (may_version, min_version)
+            _, min_version = map(int, self.request_version.split("/", 2)[1].split(".", 2))
+        except (ValueError, IndexError):
+            min_version = 1
 
         body = """<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
 <HTML><HEAD>
@@ -230,18 +230,19 @@ class SAPMSHTTPServerHandler(Loggeable, BaseHTTPRequestHandler):
 <H1>Moved Permanently</H1>
 The document has moved <A HREF="%s"> here</A>
 </BODY></HTML>
-""" % (url)
+""" % (escape(url, quote=True))
 
-        self.wfile.write(("%s 301 MOVED PERMANENTLY\n" % http_version).encode())
+        body_bytes = body.encode("utf-8")
+        self.send_response_only(301, "MOVED PERMANENTLY")
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", len(body))
+        self.send_header("Content-Length", len(body_bytes))
         self.send_header("location", url)
         self.send_header("date", self.date_time_string())
         self.send_header("server", self.version_string())
         if min_version >= 1:
             self.send_header("connection", "close")
         self.end_headers()
-        self.wfile.write(body.encode())
+        self.wfile.write(body_bytes)
 
     def do_request(self):
         data = {
@@ -264,7 +265,9 @@ The document has moved <A HREF="%s"> here</A>
             self.build_301_to_icm()
 
     def do_request_msgserver(self):
-        pass
+        self.send_response_only(404, "Not Found")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
 
 class SAPMSHTTPServerThreaded(ThreadingMixIn, HTTPServer):

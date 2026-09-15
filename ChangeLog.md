@@ -1,8 +1,17 @@
 Changelog
 =========
 
-v0.2.0 - 2026-XX-XX
+v0.2.0.dev0 (unreleased)
 -------------------
+
+- Hardened configuration includes: relative and nested JSON/YAML includes,
+  cycle detection, and non-mutating option lookup.
+- Improved feed, session, event, datastore, and eater cleanup and concurrency;
+  added deterministic regression coverage for these core paths.
+- Fixed service lifecycle cleanup and handler edge cases in Dispatcher,
+  SAPRouter, Forwarder, ICM, and Message Server HTTP; expanded socket-free tests.
+- Modernized Python 3 test and Docker workflows and refreshed the documented
+  installation path.
 
 - `honeysap/services/gateway/`: Significantly enhanced SAP RFC Gateway service.
   - Full NWRFC SDK handshake: responds to `RFC_SYSTEM_INFO`, `RFC_GET_FUNCTION_INTERFACE`,
@@ -25,8 +34,8 @@ v0.2.0 - 2026-XX-XX
 - `tools/Z_HONEYSAP_EXPORT.abap`: ABAP report to export both RFM and DDIC catalogs
   from a reference SAP system.
 
-v0.1.2 - 2022-XX-XX
--------------------
+v0.1.2 - (unreleased)
+---------------------
 
 - Project was contributed by SecureAuth to the OWASP CBAS Project in October 2022.
 - Bumped requirements libraries.

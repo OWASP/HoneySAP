@@ -181,6 +181,8 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
 
         if SAPRouter not in self.packet or not router_is_known_type(self.packet):
             self.logger.debug("Invalid packet sent to SAPRouter")
+            self.session.add_event("Invalid SAPRouter packet")
+            return
 
         router = self.packet[SAPRouter]
         if router_is_route(router):

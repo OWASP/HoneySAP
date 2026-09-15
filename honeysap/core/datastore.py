@@ -24,6 +24,7 @@ from .loader import ClassLoader
 
 
 DATASTORE_DEFAULT = "MemoryDataStore"
+_VALUE_UNSET = object()
 
 
 class DataStoreNotFound(Exception):
@@ -58,7 +59,8 @@ class BaseDataStore(Loggeable, metaclass=ABCMeta):
         """
         if key not in self.notifiers:
             self.notifiers[key] = []
-        self.notifiers[key].append(callback)
+        if callback not in self.notifiers[key]:
+            self.notifiers[key].append(callback)
         self.logger.debug("Registered watcher for key '%s'" % key)
 
     def unwatch_data(self, key, callback=None):
@@ -79,7 +81,7 @@ class BaseDataStore(Loggeable, metaclass=ABCMeta):
             except ValueError:
                 pass
 
-    def notify_data(self, key, value=None):
+    def notify_data(self, key, value=_VALUE_UNSET):
         """Notifies that a value was modified triggering the registered
         callback.
         """
@@ -89,12 +91,15 @@ class BaseDataStore(Loggeable, metaclass=ABCMeta):
             self.logger.debug("Notifying watchers for key '%s'" % key)
 
             # If value was not provided, get it from the data store
-            if value is None:
+            if value is _VALUE_UNSET:
                 value = self.get_data(key)
 
             # Callback each one of the watchers
-            for callback in self.notifiers[key]:
-                callback(key, value)
+            for callback in tuple(self.notifiers[key]):
+                try:
+                    callback(key, value)
+                except Exception:
+                    self.logger.exception("Watcher failed for key '%s'", key)
 
     def load_config(self, config):
         """Loads data from a Configuration instance into the data store.
@@ -127,7 +132,8 @@ class DataStoreManager(Loggeable):
 
     def get_datastore(self):
         if self.datastore is None:
-            self.datastore = self.datastore_cls()
-            self.datastore.load_config(self.config)
+            datastore = self.datastore_cls()
+            datastore.load_config(self.config)
+            self.datastore = datastore
             self.logger.debug("Created data store %s" % self.datastore_classname)
         return self.datastore

@@ -17,6 +17,7 @@
 
 # Standard imports
 import unittest
+from unittest.mock import Mock, patch
 # External imports
 from gevent.queue import Queue
 # Custom imports
@@ -28,31 +29,48 @@ from honeysap.core.config import Configuration
 
 class HPFeedsTest(unittest.TestCase):
 
-    # Test account on HPFriends service for checking connectivity
-    test_host = "hpfriends.honeycloud.net"
-    test_port = 20000
-    test_ident = "H9YUEy6w"
-    test_secret = "NNKg4vkYzJ09eDWX"
-    test_channel = "test"
-
     def test_hpfeeds(self):
-        """Tests the HPFeed by connecting to honeynet's HPFriends service.
-        """
+        """Publish and consume through a mocked hpfeeds connection."""
+        connection = Mock()
+        config = Configuration({"feed_host": "example.invalid", "feed_port": 20000,
+                                "feed_ident": "ident", "feed_secret": "secret",
+                                "channels": ["test"]})
+        with patch("honeysap.feeds.hpfeed.new_hpc", return_value=connection) as connect:
+            feed = HPFeed(config)
+        connect.assert_called_once_with(host="example.invalid", port=20000,
+                                        ident="ident", secret="secret", timeout=None)
+        event = Event("Test event")
+        event.session = Session(Queue(), "test", "127.0.0.1", 3200,
+                                "127.0.0.1", 3201)
+        feed.log(event)
+        connection.publish.assert_called_once_with(["test"], repr(event))
 
-        # Register an event using the HPFeed
-        configuration = Configuration({"feed": "HPFeed",
-                                       "feed_host": self.test_host,
-                                       "feed_port": self.test_port,
-                                       "feed_ident": self.test_ident,
-                                       "feed_secret": self.test_secret,
-                                       "channels": [self.test_channel]})
-        #feed = HPFeed(configuration)
-        #event = Event("Test event")
-        #event.session = Session(Queue(), "test", "127.0.0.1", 3200,
-        #                        "127.0.0.1", 3201)
+        received = Queue()
+        def send_message(on_message, on_error):
+            on_message("ident", "test", b"payload")
+        connection.run.side_effect = send_message
+        feed.consume(received)
+        connection.subscribe.assert_called_once_with(["test"])
+        self.assertEqual(received.get(timeout=2), b"payload")
+        def send_error(on_message, on_error):
+            on_error(b"error")
+        connection.run.side_effect = send_error
+        feed.consume(Queue())
+        connection.stop.assert_called_once()
+        feed.stop()
+        connection.close.assert_called_once()
 
-        #feed.log(event)
-        #feed.stop()
+    def test_default_channels(self):
+        connection = Mock()
+        with patch("honeysap.feeds.hpfeed.new_hpc", return_value=connection) as connect:
+            feed = HPFeed(Configuration({"feed_timeout": 5}))
+        self.assertEqual(connect.call_args.kwargs["timeout"], 5)
+        self.assertEqual(feed.channels, ["honeysap.events"])
+        event = Event("default", session=Session(Queue(), "test", "127.0.0.1",
+                                                1, "127.0.0.1", 2))
+        feed.log(event)
+        connection.publish.assert_called_once_with(["honeysap.events"], repr(event))
+        feed.stop()
 
 
 def test_suite():

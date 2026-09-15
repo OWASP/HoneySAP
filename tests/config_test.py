@@ -17,9 +17,9 @@
 
 # Standard imports
 import json
+import os
 import unittest
-from os import remove
-from tempfile import mkstemp
+from tempfile import mkstemp, TemporaryDirectory
 # External imports
 import yaml
 # Custom imports
@@ -36,6 +36,17 @@ class ConfigurationTest(unittest.TestCase):
     value = "SomeValue"
     new_value = "SomeNewValue"
     new_new_value = "SomeNewNewValue"
+
+    def make_temp_file(self):
+        descriptor, filename = mkstemp()
+        os.close(descriptor)
+        self.addCleanup(lambda: os.path.exists(filename) and os.remove(filename))
+        return filename
+
+    def make_temp_dir(self):
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        return directory.name
 
     def test_config(self):
         """Test the configuration object"""
@@ -73,6 +84,15 @@ class ConfigurationTest(unittest.TestCase):
         config.update(Configuration({self.new_new_key: self.new_new_value}))
         self.assertIs(self.new_new_value, config.get(self.new_new_key))
 
+        with self.assertRaises(ValueError):
+            config.update({}, mode="unknown")
+
+    def test_config_get_does_not_mutate_values(self):
+        value = {"_config_files": ["nested.json"], "key": "value"}
+        config = Configuration({"nested": value})
+        self.assertIs(value, config.get("nested"))
+        self.assertEqual(["nested.json"], value["_config_files"])
+
     def test_config_for(self):
         """Test the config_for method lookup."""
 
@@ -96,7 +116,7 @@ class ConfigurationTest(unittest.TestCase):
     def test_config_parsers(self):
         """Test the update from a file."""
 
-        test_filename = mkstemp()[1]
+        test_filename = self.make_temp_file()
 
         # Test using invalid filenames
         config = Configuration()
@@ -138,13 +158,11 @@ class ConfigurationTest(unittest.TestCase):
         config.update(test_filename, from_file=True)
         self.assertEqual(self.value, config.get(self.key))
 
-        remove(test_filename)
-
     def test_config_yaml_include(self):
         """Test yaml custom include directive."""
 
-        test_filename = mkstemp()[1]
-        test_filename_include = mkstemp()[1]
+        test_filename = self.make_temp_file()
+        test_filename_include = self.make_temp_file()
 
         with open(test_filename, 'w') as fd:
             fd.write("""---
@@ -164,14 +182,11 @@ class ConfigurationTest(unittest.TestCase):
         self.assertListEqual([test_filename_include, test_filename],
                              config.get_config_files())
 
-        remove(test_filename)
-        remove(test_filename_include)
-
     def test_config_json_include(self):
         """Test json custom include directive."""
 
-        test_filename = mkstemp()[1]
-        test_filename_include = mkstemp()[1]
+        test_filename = self.make_temp_file()
+        test_filename_include = self.make_temp_file()
 
         with open(test_filename, 'w') as fd:
             fd.write("""{
@@ -192,8 +207,58 @@ class ConfigurationTest(unittest.TestCase):
         self.assertListEqual([test_filename_include, test_filename],
                              config.get_config_files())
 
-        remove(test_filename)
-        remove(test_filename_include)
+
+    def test_nested_relative_json_includes_and_parser_reuse(self):
+        directory = self.make_temp_dir()
+        nested = os.path.join(directory, "nested")
+        os.mkdir(nested)
+        root = os.path.join(directory, "root.json")
+        child = os.path.join(nested, "child.json")
+        grandchild = os.path.join(nested, "grandchild.json")
+        with open(root, "w") as fd:
+            json.dump({"nested": {"!include": "nested/child.json"}}, fd)
+        with open(child, "w") as fd:
+            json.dump({"grandchild": {"!include": "grandchild.json"}}, fd)
+        with open(grandchild, "w") as fd:
+            json.dump({"value": "included"}, fd)
+
+        first = Configuration()
+        first.update(root, from_file=True)
+        self.assertEqual({"grandchild": {"value": "included"}}, first.get("nested"))
+        self.assertEqual([child, grandchild, root], first.get_config_files())
+
+        second = Configuration()
+        second.update(grandchild, from_file=True)
+        self.assertEqual([grandchild], second.get_config_files())
+
+    def test_nested_relative_yaml_includes(self):
+        directory = self.make_temp_dir()
+        nested = os.path.join(directory, "nested")
+        os.mkdir(nested)
+        root = os.path.join(directory, "root.yaml")
+        child = os.path.join(nested, "child.yaml")
+        grandchild = os.path.join(nested, "grandchild.yaml")
+        with open(root, "w") as fd:
+            fd.write("nested: !include nested/child.yaml\n")
+        with open(child, "w") as fd:
+            fd.write("grandchild: !include grandchild.yaml\n")
+        with open(grandchild, "w") as fd:
+            fd.write("value: included\n")
+
+        config = Configuration()
+        config.update(root, from_file=True)
+        self.assertEqual({"grandchild": {"value": "included"}}, config.get("nested"))
+        self.assertEqual([child, grandchild, root], config.get_config_files())
+
+    def test_cyclic_includes_fail(self):
+        directory = self.make_temp_dir()
+        for extension, contents in (("json", '{"nested": {"!include": "root.json"}}'),
+                                    ("yaml", "nested: !include root.yaml\n")):
+            root = os.path.join(directory, "root." + extension)
+            with open(root, "w") as fd:
+                fd.write(contents)
+            with self.assertRaises((ValueError, ConfigurationParserNotFound)):
+                Configuration().update(root, from_file=True)
 
 
 def test_suite():

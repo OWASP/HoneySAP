@@ -25,7 +25,7 @@ from optparse import OptionParser, Values
 # External imports
 # Optional imports
 try:
-    from yaml import Loader as yaml_loader, load as yaml_load
+    from yaml import Loader as yaml_loader
 except ImportError:
     yaml_loader = None
 
@@ -59,22 +59,15 @@ class ConfigurationJSONParser(ConfigurationFileParser):
     include_string = "!include"
 
     def object_hook(self, inp):
-        """Object hook for encoding unicode instances in string objects and
-        checking for include statements. """
-
-        # If the include caluse in in the current object, populate it with
-        # the include file
+        """Resolve include objects relative to the file containing them."""
         if self.include_string in inp:
-            parser = ConfigurationJSONParser()
-            self._config_files.append(inp[self.include_string])
-            return parser.parse_file(inp[self.include_string])
-
-        if isinstance(inp, dict):
-            return {self.object_hook(key): self.object_hook(value) for key, value in inp.items()}
-        elif isinstance(inp, list):
-            return [self.object_hook(element) for element in inp]
-        else:
-            return inp
+            include = inp[self.include_string]
+            if not isinstance(include, str):
+                raise ValueError("JSON include path must be a string")
+            filename = os.path.abspath(os.path.join(self._root, include))
+            self._config_files.append(filename)
+            return self._parse_file(filename)
+        return inp
 
     def check_file(self, config_file):
         """Check if the file is a valid JSON file"""
@@ -87,11 +80,22 @@ class ConfigurationJSONParser(ConfigurationFileParser):
 
     def parse_file(self, config_file):
         """Parses the JSON configuration file"""
-        # Parses the json
-        with open(config_file, 'r') as f:
-            parser = json_comment(json)
-            config = parser.load(f, object_hook=self.object_hook)
-        return Configuration(config)
+        self._config_files = []
+        self._active_files = set()
+        return Configuration(self._parse_file(os.path.abspath(config_file)))
+
+    def _parse_file(self, filename):
+        if filename in self._active_files:
+            raise ValueError("Cyclic JSON include: %s" % filename)
+        self._active_files.add(filename)
+        previous_root = getattr(self, "_root", None)
+        self._root = os.path.dirname(filename)
+        try:
+            with open(filename, 'r') as f:
+                return json_comment(json).load(f, object_hook=self.object_hook)
+        finally:
+            self._root = previous_root
+            self._active_files.remove(filename)
 
 
 if yaml_loader is not None:
@@ -100,17 +104,27 @@ if yaml_loader is not None:
 
         include_string = "!include"
 
-        def __init__(self, stream):
+        def __init__(self, stream, active_files=None):
             self._config_files = []
-            self._root = os.path.split(stream.name)[0]
+            filename = os.path.abspath(stream.name)
+            self._root = os.path.dirname(filename)
+            self._active_files = active_files or {filename}
             super(ConfigurationYAMLLoader, self).__init__(stream)
             self.add_constructor(self.include_string, ConfigurationYAMLLoader.include)
 
         def include(self, node):
-            filename = os.path.join(self._root, self.construct_scalar(node))
+            filename = os.path.abspath(os.path.join(self._root, self.construct_scalar(node)))
+            if filename in self._active_files:
+                raise ValueError("Cyclic YAML include: %s" % filename)
             self._config_files.append(filename)
             with open(filename, 'r') as f:
-                return yaml_load(f, ConfigurationYAMLLoader)
+                loader = ConfigurationYAMLLoader(f, self._active_files | {filename})
+                try:
+                    config = loader.get_single_data()
+                    self._config_files.extend(loader._config_files)
+                    return config
+                finally:
+                    loader.dispose()
 else:
     ConfigurationYAMLLoader = None
 
@@ -131,14 +145,18 @@ class ConfigurationYAMLParser(ConfigurationFileParser):
         # Try to parse the file
         try:
             with open(config_file, 'r') as f:
-                ConfigurationYAMLLoader(f).get_single_data()
-        except Exception as e:
+                loader = ConfigurationYAMLLoader(f)
+                try:
+                    loader.get_single_data()
+                finally:
+                    loader.dispose()
+        except Exception:
             return False
         return True
 
     def parse_file(self, config_file):
         """Parses the YAML configuration file"""
-        # Parses the YAML
+        self._config_files = []
         with open(config_file, 'r') as f:
             loader = ConfigurationYAMLLoader(f)
             try:
@@ -176,6 +194,8 @@ class Configuration(Values):
             fnc = self._update_careful
         elif mode == "loose":
             fnc = self._update_loose
+        else:
+            raise ValueError("Invalid configuration update mode: %s" % mode)
 
         if from_file is True:
             if isinstance(obj, str) and isfile(obj):
@@ -185,8 +205,8 @@ class Configuration(Values):
                         valid_parser = parser
                         break
                 if valid_parser:
-                    self.update(parser.parse_file(obj), mode)
-                    self._config_files.extend(parser._config_files)
+                    self.update(valid_parser.parse_file(obj), mode)
+                    self._config_files.extend(valid_parser._config_files)
                 else:
                     raise ConfigurationParserNotFound("None of the available configuration "
                                                       "parsers is able to parse the "
@@ -219,16 +239,7 @@ class Configuration(Values):
         return config
 
     def get(self, option, default=None):
-        if option in self.__dict__:
-            value = self.__dict__[option]
-            try:
-                if "_config_files" in value:
-                    del(value["_config_files"])
-            except TypeError:
-                pass
-            return value
-        else:
-            return default
+        return self.__dict__.get(option, default)
 
     def get_config_files(self):
         return self._config_files

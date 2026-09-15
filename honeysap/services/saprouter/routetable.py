@@ -87,8 +87,13 @@ class RouteTable(Loggeable):
             begin, end = ports.split("-")
         except (AttributeError, ValueError):
             begin, end = ports, ports
-
-        return range(int(begin), int(end) + 1)
+        try:
+            begin, end = int(begin), int(end)
+        except (TypeError, ValueError):
+            raise InvalidRouteTableEntry("Invalid port range")
+        if not 1 <= begin <= end <= 65535:
+            raise InvalidRouteTableEntry("Invalid port range")
+        return range(begin, end + 1)
 
     def parse_target_hosts(self, hosts, port):
         """Parses a list of hosts"""
@@ -122,7 +127,11 @@ class RouteTable(Loggeable):
                 continue
 
             # Expand ports and targets and store the data on the internal table
-            for port in self.parse_target_ports(port):
+            try:
+                ports = self.parse_target_ports(port)
+            except InvalidRouteTableEntry:
+                continue
+            for port in ports:
                 for (host, port) in self.parse_target_hosts(target, port):
                     self.table[(host, port)] = (action, talk_mode, password)
 

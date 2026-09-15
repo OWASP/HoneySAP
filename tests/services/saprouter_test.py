@@ -86,7 +86,7 @@ class RouteTableTest(unittest.TestCase):
         table = ["allow,ni,10.0.0.1,3200-3209,"]
         routetable = RouteTable(table)
 
-        for port in range(3200, 3209):
+        for port in range(3200, 3210):
             self.assertIn(("10.0.0.1", port), routetable.table)
             self.assertEqual((RouteTable.ROUTE_ALLOW,
                               RouteTable.MODE_NI,
@@ -124,6 +124,16 @@ class RouteTableTest(unittest.TestCase):
                  ]
         routetable = RouteTable(table)
         self.assertEqual(0, len(routetable.table))
+
+    def test_invalid_port_ranges_do_not_abort_table_loading(self):
+        table = ["allow,ni,10.0.0.1,invalid,",
+                 "allow,ni,10.0.0.1,3202-3200,",
+                 "allow,ni,10.0.0.1,65536,",
+                 "allow,ni,10.0.0.1,3200,"]
+        routetable = RouteTable(table)
+        self.assertEqual({("10.0.0.1", 3200):
+                          (RouteTable.ROUTE_ALLOW, RouteTable.MODE_NI, None)},
+                         routetable.table)
 
     def test_lookup_target(self):
         """Test look up of a target in the table"""

@@ -1,7 +1,7 @@
 HoneySAP: SAP Low-interaction honeypot
 ======================================
 
-Version v\ |release| (:ref:`user/installation`)
+Version v\ |release| (:doc:`user/installation`)
 
 
 Overview

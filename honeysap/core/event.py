@@ -53,7 +53,7 @@ class Event(object):
     @staticmethod
     def _serialize_data(data):
         """Make event data JSON-serializable."""
-        if not data:
+        if data is None:
             return ""
         if isinstance(data, bytes):
             try:

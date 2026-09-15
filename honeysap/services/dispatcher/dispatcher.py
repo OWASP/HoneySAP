@@ -119,6 +119,10 @@ class SAPDispatcherServerHandler(Loggeable, SAPNIServerHandler):
 
     def handle_msg(self):
         self.logger.debug("Received message from client %s" % str(self.client_address))
+        if SAPDiag not in self.packet:
+            self.session.add_event("Invalid dispatcher packet")
+            self.logoff()
+            return
         diag = self.packet[SAPDiag]
 
         # Client signals end of conversation/connection (e.g. closing the

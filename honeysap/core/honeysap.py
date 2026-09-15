@@ -97,7 +97,6 @@ class HoneySAP(Loggeable):
         self.logger.info("Setting up data store")
         self.datastore_manager = DataStoreManager(self.config)
         self.datastore = self.datastore_manager.get_datastore()
-        self.datastore.load_config(self.config)
 
     def setup_sessions(self):
         """Setup attack session manager"""
@@ -120,14 +119,18 @@ class HoneySAP(Loggeable):
         """Launch the configured and enabled services"""
 
         self.logger.info("Starting feed manager")
-        self.feed_manager.run()
-        self.logger.info("Starting services")
         try:
+            self.feed_manager.run()
+            self.logger.info("Starting services")
             self.service_manager.run()
         except KeyboardInterrupt:
+            pass
+        finally:
             self.stop()
 
     def stop(self):
         """Stop all running services and feeds"""
-        self.feed_manager.stop()
-        self.service_manager.stop()
+        try:
+            self.feed_manager.stop()
+        finally:
+            self.service_manager.stop()
