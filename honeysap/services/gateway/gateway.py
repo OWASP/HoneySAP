@@ -38,17 +38,28 @@ from honeysap.services.gateway.rfm_catalog import load_rfm_catalog
 from honeysap.services.gateway.ddic_catalog import load_ddic_catalog
 
 
-# Full 4-byte CPIC field paddings from pysap.  In the login handshake the
-# TLV sequence is fixed, so the full padd (prev_end + field_start) reliably
-# matches.  Using .find() on 4 bytes is faster than scanning for 2-byte
-# markers byte-by-byte.
-CPIC_RFC_F_PADD = cpic_padd["cpic_RFC_f_padd"].encode("latin-1")
-CPIC_PROGRAM_PADD = cpic_padd["cpic_program_padd"].encode("latin-1")
-CPIC_USERNAME_PADD = cpic_padd["cpic_username1_padd"].encode("latin-1")
-CPIC_CLI_NBR_PADD = cpic_padd["cpic_cli_nbr1_padd"].encode("latin-1")
-CPIC_IP_PADD = cpic_padd["cpic_ip_padd"].encode("latin-1")
-CPIC_HOSTNAME_PADD = cpic_padd["cpic_host_sid_inbr_padd"].encode("latin-1")
-CPIC_DEST_PADD = cpic_padd["cpic_dest_padd"].encode("latin-1")
+# Full 4-byte CPIC field paddings from pysap.  pysap <= 0.2.0 exposed these
+# values as latin-1 strings, while current releases expose the wire-native
+# ``bytes`` values.  Keep HoneySAP compatible with both representations.
+def _cpic_padd_bytes(value):
+    """Return a CPIC padding value as bytes for any supported pysap release."""
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, str):
+        return value.encode("latin-1")
+    return bytes(value)
+
+
+# In the login handshake the TLV sequence is fixed, so the full padd
+# (prev_end + field_start) reliably matches.  Using .find() on 4 bytes is
+# faster than scanning for 2-byte markers byte-by-byte.
+CPIC_RFC_F_PADD = _cpic_padd_bytes(cpic_padd["cpic_RFC_f_padd"])
+CPIC_PROGRAM_PADD = _cpic_padd_bytes(cpic_padd["cpic_program_padd"])
+CPIC_USERNAME_PADD = _cpic_padd_bytes(cpic_padd["cpic_username1_padd"])
+CPIC_CLI_NBR_PADD = _cpic_padd_bytes(cpic_padd["cpic_cli_nbr1_padd"])
+CPIC_IP_PADD = _cpic_padd_bytes(cpic_padd["cpic_ip_padd"])
+CPIC_HOSTNAME_PADD = _cpic_padd_bytes(cpic_padd["cpic_host_sid_inbr_padd"])
+CPIC_DEST_PADD = _cpic_padd_bytes(cpic_padd["cpic_dest_padd"])
 
 # 2-byte start-markers for login CPIC fields.
 # The 4-byte cpic_padd values encode [prev_end(2)][curr_start(2)], so they
