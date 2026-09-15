@@ -13,6 +13,9 @@
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import MagicMock, Mock
+
+from scapy.packet import Raw
 
 from pysap.SAPDiag import SAPDiagItem
 from pysap.SAPEPP import SAPEPP
@@ -45,3 +48,31 @@ class DispatcherPassportTest(unittest.TestCase):
         parsed_item = SAPDiagItem(bytes(item))
         self.assertIsInstance(parsed_item.item_value, SAPEPP)
         self.assertEqual(bytes(parsed_item.item_value), raw)
+
+
+class DispatcherHandlerTest(unittest.TestCase):
+
+    def test_dispatcher_client_termination_closes_connection(self):
+        handler = SAPDispatcherServerHandler.__new__(SAPDispatcherServerHandler)
+        handler.client_address = ("127.0.0.1", 1)
+        handler.server = SimpleNamespace(clients={handler.client_address: object()})
+        handler.session = Mock()
+        handler.request = Mock()
+        diag = SimpleNamespace(com_flag_TERM_EOC=True, com_flag_TERM_EOP=False)
+        handler.packet = MagicMock()
+        handler.packet.__getitem__.return_value = diag
+        handler.handle_msg()
+        handler.request.close.assert_called_once_with()
+        self.assertNotIn(handler.client_address, handler.server.clients)
+
+    def test_dispatcher_malformed_initialized_packet_logs_off(self):
+        handler = SAPDispatcherServerHandler.__new__(SAPDispatcherServerHandler)
+        handler.client_address = ("127.0.0.1", 1)
+        handler.server = SimpleNamespace(clients={handler.client_address: object()})
+        handler.packet = Raw(b"invalid")
+        handler.session = Mock()
+        handler.request = Mock()
+        handler.handle_msg()
+        self.assertNotIn(handler.client_address, handler.server.clients)
+        self.assertEqual(handler.session.add_event.call_args_list[0].args[0],
+                         "Invalid dispatcher packet")
