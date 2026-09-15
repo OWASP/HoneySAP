@@ -1,19 +1,26 @@
 # HoneySAP Dockerfile
 
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 LABEL maintainer="martin.gallo@gmail.com"
 
 # Install system packages
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
         git \
-        python3-pip \
-        python3-dev \
-        build-essential \
-        python3-yaml && \
+        python3 \
+        python3-venv && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
+# Ubuntu 24.04 marks its system Python as externally managed. Install Python
+# packages in an isolated environment instead of overriding that protection.
+RUN python3 -m venv /opt/honeysap-venv
+ENV PATH="/opt/honeysap-venv/bin:$PATH"
+RUN python3 -m pip install --upgrade pip setuptools wheel
+
+# .dockerignore limits this copy to the application, default profile/catalogs,
+# packaging inputs, and any optional bundled pysap source archive.
 COPY . /opt/honeysap
 WORKDIR /opt/honeysap
 
@@ -37,4 +44,4 @@ RUN python3 -m pip install . && \
 # SAP MS (HTTP)  : 8100
 EXPOSE 3299 3200 3300 8000 3600 8100
 
-CMD ["/usr/local/bin/honeysap", "--config-file", "profiles/internal.yml"]
+CMD ["/opt/honeysap-venv/bin/honeysap", "--config-file", "profiles/internal.yml"]
