@@ -26,6 +26,7 @@ from scapy.packet import bind_layers
 from pysap.SAPDiag import (SAPDiag, SAPDiagDP, SAPDiagItem)
 from pysap.SAPNI import (SAPNIServerThreaded, SAPNIServerHandler, SAPNIClient)
 from pysap.SAPNWRFC import decode_value
+from pysap.SAPEPP import SAPEPP
 from pysap.SAPDiagItems import (support_data_sapnw_702, SAPDiagAreaSize,
                                 SAPDiagMenuEntries, SAPDiagMenuEntry,
                                 SAPDiagDyntAtom, SAPDiagDyntAtomItem,
@@ -472,11 +473,11 @@ class SAPDispatcherServerHandler(Loggeable, SAPNIServerHandler):
         sid = self.sid.encode() if isinstance(self.sid, str) else self.sid
         hostname = self.hostname.encode() if isinstance(self.hostname, str) else self.hostname
         context_id = self.context_id.encode() if isinstance(self.context_id, str) else self.context_id
-        return b"*TH*\x03\x00\xe6\x00\x00" + sid + b"/" + hostname + b"_" + sid + b"_00" \
-               b"           \x00\x01                                                                        \x00" \
-               b"\x01" + sid + b"/" + hostname + b"_" + sid + b"_00           " + context_id + b"\x00" \
-               b"\x01\x08\x00'\xf6W\xe5\x1e\xe4\xb6\x82\xf8\x15\x98\x9c>:\x00" \
-               b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xe2*TH*"
+        client_no = self.client_no.encode() if isinstance(self.client_no, str) else self.client_no
+        component = sid + b"/" + hostname + b"_" + sid + b"_00"
+        return SAPEPP(component=component, previous_component=component,
+                      transaction_id=context_id, client=client_no,
+                      root_context_id=unhexlify(context_id))
 
     def make_context_id(self):
         return ''.join(SystemRandom().choice(string.hexdigits) for _ in range(32)).upper()

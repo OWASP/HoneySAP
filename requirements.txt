@@ -1,4 +1,4 @@
-pysap>=0.1.20.dev0
+pysap>=0.2.1.dev0
 flask>=2.0
 gevent>=21.1.0
 SQLAlchemy>=1.4.11
