@@ -73,7 +73,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
 
     @property
     def release(self):
-        return int(self.config.get("release", 916))
+        return int(self.config.get("release", 0))
 
     @property
     def router_version(self):
@@ -81,8 +81,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
 
     @property
     def router_version_patch(self):
-        return int(self.config.get("router_version_patch",
-                                   7 if self.release == 916 else 4))
+        return int(self.config.get("router_version_patch", 0))
 
     @property
     def error_profile(self):
@@ -205,7 +204,12 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
         if limit is not None and packet_length > limit:
             self.logger.debug("Oversized SAPRouter request (%d bytes)", packet_length)
             self.session.add_event("Invalid SAPRouter packet")
-            self.close()
+            if self.error_profile["oversized_request_error"]:
+                self.emit_profile_error(
+                    "packet_too_big", request_length=packet_length,
+                    max_request_length=limit)
+            else:
+                self.close()
             return
 
         if SAPRouter not in self.packet or not router_is_known_type(self.packet):
@@ -253,10 +257,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
             self.route_request(pkt)
 
     def check_route(self, pkt):
-        """Reject malformed route metadata before destination lookup.
-
-        The default line values are observed on SAPRouter 9.16-100.
-        """
+        """Reject malformed route metadata before destination lookup."""
         hops = pkt.route_string or []
         if pkt.route_length and not hops:
             return self.invalid_route("missing_route_bytes")
@@ -264,15 +265,17 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
                      len(bytes(pkt.payload)) > 0):
             return self.invalid_route("bad_length")
         if not hops:
-            return self.invalid_route("no_hops")
+            reason = ("no_hops_one_entry" if pkt.route_entries == 1
+                      else "no_hops")
+            return self.invalid_route(reason)
         if pkt.route_entries < 2 or pkt.route_entries != len(hops):
             return self.invalid_route("bad_entries")
         if pkt.route_rest_nodes >= pkt.route_entries:
             return self.invalid_route("bad_rest")
         actual_offset = sum(len(hop) for hop in hops[:pkt.route_rest_nodes])
-        if (pkt.route_offset >= pkt.route_length or
-                pkt.route_offset != actual_offset):
-            return self.invalid_route("bad_offset")
+        if pkt.route_offset >= pkt.route_length or pkt.route_offset != actual_offset:
+            reason = "zero_offset" if pkt.route_offset == 0 else "bad_offset"
+            return self.invalid_route(reason)
         if pkt.route_ni_version == 0:
             self.emit_profile_error("route_version_old",
                                     route_ni_version=pkt.route_ni_version)
@@ -298,9 +301,9 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
             target_port = int(route_string.port)
         except (TypeError, ValueError):
             # Do not resolve arbitrary route destinations from a honeypot.
-            # A non-IP hostname without a numeric service follows the 9.16
-            # unknown-host path; other invalid services receive a bounded
-            # error instead of unwinding the handler thread.
+            # A non-IP hostname follows the configured unknown-host path;
+            # other invalid services receive a bounded error instead of
+            # unwinding the handler thread.
             try:
                 ip_address(target_host)
             except ValueError:
@@ -370,8 +373,8 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
                                                                          "password": route_password},
                                    request=str(pkt))
             if pkt.route_talk_mode == RouteTable.MODE_RAW:
-                # 9.16 acknowledges an allowed native/raw route first, then
-                # closes the stream when the local partner is unavailable.
+                # The configured raw route behavior acknowledges the route,
+                # then closes when the local partner is unavailable.
                 self.advance_profile_count("raw_unreachable_step")
                 self.request.send(SAPRouter(type=SAPRouter.SAPROUTER_PONG))
                 self.close()
@@ -616,7 +619,7 @@ class SAPRouterService(BaseTCPService):
 
     def setup_server(self):
         error_profile = resolve_error_profile(
-            int(self.config.get("release", 916)),
+            int(self.config.get("release", 0)),
             self.config.get("error_profile", None))
         error_count_start = int(self.config.get(
             "error_count_start", error_profile["error_count"]["start"]))

@@ -10,7 +10,9 @@ v0.2.0.dev0 (unreleased)
     process-dynamic error counters and clean routed-client shutdown with older
     pysap releases. Version-specific error text, metadata, and counter steps
     can now be overridden per service with `error_profile`, with a default
-    profile for SAPRouter version 9.16.
+    baseline and validated standalone profile examples for reference builds;
+    service definitions can import reusable error-profile YAML fragments.
+    Build identity no longer selects hard-coded response definitions.
   - Matched the newest malformed-route length, old-version, empty/unknown host,
     invalid-service, and oversized-request branches with configurable errors;
     prevented uncaught route-port conversion errors and unintended DNS lookups.

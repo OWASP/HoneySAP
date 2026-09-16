@@ -29,7 +29,7 @@ from pysap.utils.fields import saptimestamp_to_datetime
 # Custom imports
 from honeysap.core.config import Configuration, ConfigurationYAMLParser
 from honeysap.services.saprouter.error_profiles import (
-    DEFAULT_ERROR_PROFILE_916, TEMPLATE_CONTEXT, render_error_options,
+    DEFAULT_ERROR_PROFILE, TEMPLATE_CONTEXT, render_error_options,
     resolve_error_profile)
 from honeysap.services.saprouter.routetable import RouteTable
 from honeysap.services.forwarder import ForwarderService
@@ -48,36 +48,28 @@ class SAPRouterTest(unittest.TestCase):
         self.assertEqual(saptimestamp_to_datetime(saprouter_time(started)),
                          started)
 
-    def test_916_default_and_legacy_release_profiles(self):
-        modern = resolve_error_profile(916)
-        self.assertEqual(modern["errors"]["route_denied"]["detail"], "H<1>")
-        self.assertEqual(modern["errors"]["admin_info_denied"]["return_code"], -99)
-        self.assertTrue(modern["error_count"]["enabled"])
-        self.assertEqual(modern["error_count"]["start"], 1)
-        self.assertEqual(modern["max_request_length"], 10024)
-        self.assertTrue(modern["unknown_packet_error"])
-
-        older = resolve_error_profile("720")
-        self.assertEqual(older["fields"]["module"], "nirout.cpp")
-        self.assertEqual(older["errors"]["route_denied"]["detail"], "")
-        self.assertEqual(older["errors"]["admin_info_denied"]["return_code"], -94)
-        self.assertFalse(older["error_count"]["enabled"])
-        self.assertIsNone(older["max_request_length"])
-        self.assertFalse(older["unknown_packet_error"])
+    def test_default_profile_is_release_neutral(self):
+        first = resolve_error_profile(100)
+        second = resolve_error_profile(200)
+        self.assertEqual(first, second)
+        self.assertEqual(first, DEFAULT_ERROR_PROFILE)
+        self.assertFalse(first["error_count"]["enabled"])
+        self.assertIsNone(first["max_request_length"])
+        self.assertFalse(first["unknown_packet_error"])
 
     def test_packet_behavior_profile_overrides_and_normalization(self):
-        modern = resolve_error_profile(916, {
+        modern = resolve_error_profile(100, {
             "max_request_length": "64", "unknown_packet_error": False})
         self.assertEqual(modern["max_request_length"], 64)
         self.assertFalse(modern["unknown_packet_error"])
-        self.assertEqual(resolve_error_profile(916, {
+        self.assertEqual(resolve_error_profile(100, {
             "max_request_length": None})["max_request_length"], None)
-        self.assertEqual(resolve_error_profile(720, {
+        self.assertEqual(resolve_error_profile(200, {
             "max_request_length": 128})["max_request_length"], 128)
-        self.assertEqual(resolve_error_profile(916)["max_request_length"], 10024)
+        self.assertIsNone(resolve_error_profile(100)["max_request_length"])
 
     def test_partial_overrides_do_not_mutate_version_defaults(self):
-        custom = resolve_error_profile(916, {
+        custom = resolve_error_profile(100, {
             "fields": {"component": "Router NI"},
             "error_count": {"start": 10},
             "errors": {"route_denied": {"error": "blocked $target_host"}}
@@ -86,19 +78,19 @@ class SAPRouterTest(unittest.TestCase):
         self.assertEqual(custom["error_count"]["start"], 10)
         self.assertEqual(custom["errors"]["route_denied"]["error"],
                          "blocked $target_host")
-        self.assertEqual(DEFAULT_ERROR_PROFILE_916["fields"]["component"],
+        self.assertEqual(DEFAULT_ERROR_PROFILE["fields"]["component"],
                          "NI (network interface)")
-        self.assertEqual(resolve_error_profile(916)["error_count"]["start"], 1)
+        self.assertEqual(resolve_error_profile(100)["error_count"]["start"], 1)
 
     def test_invalid_route_can_override_one_line_or_all_lines(self):
-        one = resolve_error_profile(916, {"errors": {"invalid_route": {
+        one = resolve_error_profile(100, {"errors": {"invalid_route": {
             "line_by_reason": {"bad_offset": "908"}}}})
         self.assertEqual(render_error_options(
             one, "invalid_route", TEMPLATE_CONTEXT, "bad_offset")["line"], "908")
         self.assertEqual(render_error_options(
-            one, "invalid_route", TEMPLATE_CONTEXT, "no_hops")["line"], "3997")
+            one, "invalid_route", TEMPLATE_CONTEXT, "no_hops")["line"], "")
 
-        all_lines = resolve_error_profile(916, {"errors": {"invalid_route": {
+        all_lines = resolve_error_profile(100, {"errors": {"invalid_route": {
             "line": "same-line"}}})
         self.assertEqual(render_error_options(
             all_lines, "invalid_route", TEMPLATE_CONTEXT, "bad_offset")["line"],
@@ -117,6 +109,7 @@ class SAPRouterTest(unittest.TestCase):
                    {"max_request_length": True},
                    {"max_request_length": 1.5},
                    {"max_request_length": "ten"},
+                   {"oversized_request_error": 1},
                    {"unknown_packet_error": 1})
         for overrides in invalid:
             with self.subTest(overrides=overrides):
@@ -132,22 +125,34 @@ class SAPRouterTest(unittest.TestCase):
     def test_existing_counter_start_option_takes_precedence(self):
         config = Configuration({"virtual": True, "release": "916",
                                 "error_count_start": 3,
-                                "error_profile": {"error_count": {"start": 10}}})
+                                "error_profile": {"error_count": {
+                                    "enabled": True, "start": 10}}})
         service = SAPRouterService(config, Mock(), Mock(), Mock())
         try:
             self.assertEqual(service.server.error_count, 3)
         finally:
             service.stop()
 
-    def test_standalone_916_yaml_profile_loads(self):
-        profile_file = Path(__file__).parents[2] / "profiles" / "saprouter-916.yml"
-        config = ConfigurationYAMLParser().parse_file(str(profile_file))
-        service = config.config_for("services", "service", "SAPRouterService")[0]
-        self.assertEqual(service.get("release"), 916)
-        self.assertEqual(service.get("route_table"), [])
-        resolved = resolve_error_profile(service.get("release"),
-                                         service.get("error_profile"))
-        self.assertEqual(resolved, DEFAULT_ERROR_PROFILE_916)
+    def test_packaged_saprouter_error_profiles_load_and_resolve(self):
+        profiles = Path(__file__).parents[2] / "profiles"
+        for profile_file in sorted(profiles.glob("saprouter-*.yml")):
+            with self.subTest(profile=profile_file.name):
+                parser = ConfigurationYAMLParser()
+                config = parser.parse_file(str(profile_file))
+                services = config.config_for("services", "service",
+                                             "SAPRouterService")
+                self.assertEqual(len(services), 1)
+                service = services[0]
+                self.assertTrue(service.get("enabled"))
+                self.assertIsNotNone(service.get("release"))
+                self.assertIsInstance(service.get("error_profile"), dict)
+                resolved = resolve_error_profile(service.get("release"),
+                                                 service.get("error_profile"))
+                self.assertIn("fields", resolved)
+                self.assertIn("errors", resolved)
+                self.assertIn("error_count", resolved)
+                fragment = profiles / "error_profiles" / profile_file.name
+                self.assertIn(str(fragment.resolve()), parser._config_files)
 
     def test_permissions_do_not_create_connected_info_clients(self):
         config = Configuration({"virtual": True, "release": 916,
@@ -375,6 +380,27 @@ class SAPRouterHandlerTest(unittest.TestCase):
         self.assertEqual(response.return_code, -93)
         self.assertEqual(response.err_text_value.line, b"3825")
 
+    def test_router_profile_can_reply_to_oversized_packet(self):
+        handler = self.make_router_handler()
+        handler.config.update({"release": 800, "error_profile": {
+            "max_request_length": 8,
+            "oversized_request_error": True,
+            "error_count": {"enabled": True},
+            "errors": {"packet_too_big": {
+                "module": "nibuf.cpp", "line": "3060"}}}})
+        handler.close = Mock()
+        handler.packet = SAPNI() / Raw(b"X" * 9)
+        handler.handle_data()
+
+        handler.close.assert_not_called()
+        response = handler.request.send.call_args.args[0]
+        self.assertEqual(response.return_code, -93)
+        self.assertEqual(response.err_text_value.error, b"Network packet too big")
+        self.assertEqual(response.err_text_value.detail,
+                         b"message length 9 exceeds max (8)")
+        self.assertEqual(response.err_text_value.module, b"nibuf.cpp")
+        self.assertEqual(response.err_text_value.line, b"3060")
+
     def test_router_packet_limit_can_be_overridden_or_disabled(self):
         handler = self.make_router_handler()
         handler.config.update({"error_profile": {"max_request_length": 8}})
@@ -385,7 +411,8 @@ class SAPRouterHandlerTest(unittest.TestCase):
         handler.request.send.assert_not_called()
 
         handler = self.make_router_handler()
-        handler.config.update({"error_profile": {"max_request_length": None}})
+        handler.config.update({"error_profile": {
+            "max_request_length": None, "unknown_packet_error": True}})
         handler.close = Mock()
         handler.packet = SAPNI() / Raw(b"X" * 10025)
         handler.handle_data()
@@ -397,7 +424,7 @@ class SAPRouterHandlerTest(unittest.TestCase):
         handler.close = Mock()
         handler.packet = SAPNI() / Raw(b"X" * 10025)
         handler.handle_data()
-        handler.close.assert_not_called()
+        handler.close.assert_called_once_with()
         handler.request.send.assert_not_called()
 
     def test_router_unknown_packet_reply_is_profile_controlled(self):
@@ -416,10 +443,12 @@ class SAPRouterHandlerTest(unittest.TestCase):
 
     def make_router_handler(self):
         handler = SAPRouterServerHandler.__new__(SAPRouterServerHandler)
-        handler.config = Configuration({"release": 916, "hostname": "saprouter-lab",
-                                        "router_version": 40,
-                                        "router_version_patch": 7,
-                                        "external_admin": False})
+        profile_file = (Path(__file__).parents[2] / "profiles" /
+                        "saprouter-916.yml")
+        config = ConfigurationYAMLParser().parse_file(str(profile_file))
+        handler.config = config.config_for(
+            "services", "service", "SAPRouterService")[0]
+        handler.config.update({"hostname": "saprouter-lab"})
         handler.client_address = ("172.17.0.1", 50000)
         handler.server = SimpleNamespace(route_table=RouteTable(None),
                                          listener_port=3299, error_count=1,
@@ -429,19 +458,19 @@ class SAPRouterHandlerTest(unittest.TestCase):
         handler.request = Mock()
         return handler
 
-    def test_router_defaults_to_916_error_text_without_release_option(self):
+    def test_router_without_profile_uses_neutral_identity_and_errors(self):
         handler = self.make_router_handler()
         handler.config = Configuration({"hostname": "router.example"})
         handler.deny_route("127.0.0.1", 3200)
         response = handler.request.send.call_args.args[0]
-        self.assertEqual(handler.release, 916)
-        self.assertEqual(handler.router_version_patch, 7)
-        self.assertEqual(response.err_text_value.release, b"916")
+        self.assertEqual(handler.release, 0)
+        self.assertEqual(handler.router_version_patch, 0)
+        self.assertEqual(response.err_text_value.release, b"0")
         self.assertEqual(response.err_text_value.version, b"40")
         self.assertEqual(response.err_text_value.module, b"")
         self.assertEqual(response.err_text_value.location,
-                         b"SAProuter 40.7 on 'router.example'")
-        self.assertEqual(response.err_text_value.error_count, b"4")
+                         b"SAProuter 40.0 on 'router.example'")
+        self.assertEqual(response.err_text_value.error_count, b"")
 
     def test_router_error_profile_overrides_text_metadata_and_serial(self):
         handler = self.make_router_handler()
@@ -450,7 +479,7 @@ class SAPRouterHandlerTest(unittest.TestCase):
                        "location": "Router $release on '$hostname'"},
             "error_time_format": "%Y",
             "partner_name_mode": "loopback",
-            "error_count": {"start": 10},
+            "error_count": {"enabled": True, "start": 10},
             "errors": {"route_denied": {
                 "return_code": -77,
                 "error": "blocked $target_host:$target_port for $peer_ip",
@@ -481,7 +510,7 @@ class SAPRouterHandlerTest(unittest.TestCase):
     def test_router_profile_controls_version_and_unknown_opcode_steps(self):
         handler = self.make_router_handler()
         handler.config.update({"error_profile": {
-            "error_count": {"version_request_step": 9},
+            "error_count": {"enabled": True, "version_request_step": 9},
             "errors": {"control_unknown": {"count_step": 4,
                                             "count_after": 6}}
         }})
@@ -497,7 +526,7 @@ class SAPRouterHandlerTest(unittest.TestCase):
     def test_router_profile_controls_generic_error_step_and_serial_disable(self):
         handler = self.make_router_handler()
         handler.config.update({"error_profile": {"error_count": {
-            "start": 10, "default_error_step": 8}}})
+            "enabled": True, "start": 10, "default_error_step": 8}}})
         del handler.server.error_count
         handler.return_error(return_code=-1, error="synthetic error")
         response = handler.request.send.call_args.args[0]
@@ -511,15 +540,15 @@ class SAPRouterHandlerTest(unittest.TestCase):
         self.assertEqual(response.err_text_value.error_count, b"")
         self.assertEqual(handler.server.error_count, 1)
 
-    def test_router_explicit_older_release_keeps_generic_error_baseline(self):
+    def test_router_identity_does_not_select_an_error_profile(self):
         handler = self.make_router_handler()
         handler.config = Configuration({"release": "720", "hostname": "router.example"})
         handler.deny_route("127.0.0.1", 3200)
         response = handler.request.send.call_args.args[0]
         self.assertEqual(handler.release, 720)
-        self.assertEqual(handler.router_version_patch, 4)
+        self.assertEqual(handler.router_version_patch, 0)
         self.assertEqual(response.err_text_value.release, b"720")
-        self.assertEqual(response.err_text_value.module, b"nirout.cpp")
+        self.assertEqual(response.err_text_value.module, b"")
         self.assertEqual(response.err_text_value.detail, b"")
         self.assertEqual(response.err_text_value.error_count, b"")
 

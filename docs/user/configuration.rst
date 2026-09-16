@@ -149,3 +149,13 @@ The following are configuration options related to the SAP instance:
    
    # Hostname
    hostname: sapnw702
+
+
+Versioned behavior profiles
+---------------------------
+
+A service may expose a nested behavior or error profile when observable
+responses vary between product builds. Such profiles are ordinary service
+configuration, not a permanent registry of supported versions. The example
+files under ``profiles/`` can therefore change as emulation targets are added,
+updated, or retired.

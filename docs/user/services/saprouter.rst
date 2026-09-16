@@ -19,18 +19,16 @@ The patch level version of the SAP Router.
 
 ``release``:
 
-Release reported in error replies. An omitted release defaults to 916. An
-explicit non-916 release retains the previous generic error baseline unless
-``error_profile`` overrides it. A release value may be an integer or a
-numeric string. Service options inherit top-level profile values, so a
-top-level ``release: 720`` still selects the older baseline unless the
-SAPRouter service entry explicitly sets ``release: 916``.
+Release reported in error replies. An omitted release uses the neutral value
+``0``. A release value may be an integer or a numeric string. The value is
+identity metadata only and does not select error behavior; import or inline
+an ``error_profile`` to emulate a particular build.
 
 ``error_profile``:
 
-Partial, service-local overrides for version-specific SAPRouter error replies.
-Unlisted values use the built-in 9.16 profile for release 916, or the previous
-generic baseline for an explicitly older release. The profile supports:
+Partial, service-local overrides for SAPRouter error replies. Unlisted values
+use a release-neutral baseline intended to keep the service bounded, not to
+emulate a particular build. The profile supports:
 
 * ``fields``: common fields in the :class:`pysap.SAPRouter.SAPRouterError`
   text packet, including ``counter``, ``component``, ``module``, ``location``,
@@ -42,19 +40,23 @@ generic baseline for an explicitly older release. The profile supports:
   ``host_empty``, ``host_unknown``, ``service_invalid``, and
   ``route_expected``. Each accepts the modeled
   error-text fields plus ``count_step`` and ``count_after``. ``invalid_route``
-  also accepts ``line_by_reason`` with ``no_hops``, ``missing_route_bytes``,
-  ``bad_length``, ``bad_entries``, ``bad_offset``, and ``bad_rest`` keys.
+  also accepts ``line_by_reason`` with ``no_hops``, ``no_hops_one_entry``,
+  ``missing_route_bytes``, ``bad_length``, ``bad_entries``, ``zero_offset``,
+  ``bad_offset``, and ``bad_rest`` keys.
 * ``error_count``: ``enabled``, ``start``, ``default_error_step``,
   ``version_request_step``, ``route_accept_step``, and
   ``raw_unreachable_step`` for the process-level NI serial. Error cases can
   set their own ``count_step`` and ``count_after``.
 * ``max_request_length``: maximum NI payload size accepted by the handler.
-  The 9.16 default is 10024 bytes; the legacy default is ``null`` (no
-  profile-level limit). Set a positive integer to change the limit or
-  ``null`` to disable it. Over-limit requests close without an error frame.
+  The neutral baseline is ``null`` (no profile-level limit). Set a positive
+  integer to enforce a limit or ``null`` to disable it.
+* ``oversized_request_error``: whether an over-limit request receives the
+  configurable ``packet_too_big`` error. The default is ``false``, which
+  closes the connection without an error frame. A profile can enable it when
+  the emulated build returns a structured error instead.
 * ``unknown_packet_error``: whether an unrecognized, in-limit packet gets
-  the configurable ``route_expected`` error. The 9.16 default is ``true``;
-  the legacy default is ``false``.
+  the configurable ``route_expected`` error. The neutral baseline is
+  ``false``.
 * ``error_time_format``: ``strftime`` format for the dynamic error timestamp.
 * ``partner_name_mode``: ``literal`` or ``loopback`` for a permitted but
   unreachable loopback partner.
@@ -63,8 +65,9 @@ Text values use ``$name`` or ``${name}`` placeholders. Available names are
 ``hostname``, ``release``, ``router_version``, ``router_version_patch``,
 ``peer_ip``, ``target_host``, ``target_port``, ``partner_host``,
 ``listener_port``, ``opcode``, ``timeout``, and ``route_ni_version``. Use ``$$`` for a literal dollar
-sign. Unknown case names, fields, and placeholders reject the configuration
-before the SAPRouter listener is started.
+sign. The ``packet_too_big`` case also receives ``request_length`` and
+``max_request_length``. Unknown case names, fields, and placeholders reject
+the configuration before the SAPRouter listener is started.
 
 For example, a build with a different denial message and source line can
 override only those values:
@@ -83,16 +86,61 @@ override only those values:
          line_by_reason:
            bad_offset: "908"
 
-The standalone :download:`9.16 profile <../../../profiles/saprouter-916.yml>` shows
-the service configuration and a complete copy of the built-in error defaults.
-Partial overrides are sufficient for ordinary profiles. These templates emulate
-observable text; they are not evidence that every build shares the same
-internal module paths or error serial behavior.
+Constructing error profiles
+---------------------------
 
-Under the default 9.16 profile, NI request payloads longer than 10024 bytes
-close without an error frame; shorter non-router requests produce the
-configurable ``route_expected`` error. Other profiles can change both
-behaviors. Malformed route length is checked before hop
+Files matching ``profiles/saprouter-*.yml`` are standalone examples of the
+same configuration mechanism; they are not a fixed list of supported
+versions. Profiles may be added, replaced, or removed as reference behavior
+is collected and maintained.
+
+To construct a profile, start with an ordinary ``SAPRouterService`` entry,
+set the identity fields such as ``release``, ``router_version``, and
+``router_version_patch``, then place observed differences under
+``error_profile``. Prefer partial overrides of the built-in baseline unless a
+self-contained profile is needed for distribution. Keep dynamic values as
+templates, and expose behavioral differences such as request limits or error
+serial steps as settings instead of branching on a particular release in the
+handler.
+
+The error mapping can be kept in a separate YAML fragment and imported from
+the service definition. Include paths are relative to the file containing the
+``!include`` directive:
+
+.. code-block:: yaml
+
+   services:
+     - service: SAPRouterService
+       enabled: true
+       release: 800
+       error_profile: !include error_profiles/example.yml
+
+The imported file contains the mapping that would otherwise be written below
+``error_profile``; it must not repeat the ``error_profile`` key:
+
+.. code-block:: yaml
+
+   fields:
+     release: "$release"
+     module: "nirout.cpp"
+   errors:
+     route_denied:
+       return_code: -94
+       error: "route permission denied"
+
+Every shipped ``saprouter-*.yml`` file is discovered by the SAPRouter tests.
+The tests parse it, require exactly one enabled ``SAPRouterService``, and
+resolve its complete error profile. Behavioral tests exercise the profile
+mechanism independently with synthetic inline overrides, so changing the set
+of packaged versions does not require adding or deleting version-named test
+cases. A new setting still requires focused positive, negative, validation,
+and handler coverage.
+
+These templates emulate observable behavior; they are not evidence that every
+build shares the same internal module paths or error serial behavior.
+
+Request-length and unknown-packet behavior come from the selected profile.
+Malformed route length is checked before hop
 counts or offsets. The empty-host, unknown-host, old-route-version, and
 invalid-service branches use profile-defined errors without outbound DNS
 lookup. These checks mimic observed negative responses, not full routing
