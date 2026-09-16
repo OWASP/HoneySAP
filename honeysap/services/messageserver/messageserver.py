@@ -21,7 +21,8 @@ from socket import timeout
 from socketserver import ThreadingMixIn
 from http.server import HTTPServer, BaseHTTPRequestHandler
 # External imports
-from pysap.SAPMS import (SAPMS, ms_flag_values, ms_iflag_values,
+from pysap.SAPMS import (SAPMS, SAPMSPayload, SAPMSPeerPayload,
+                         ms_flag_values, ms_iflag_values,
                          ms_opcode_values)
 from pysap.SAPNI import SAPNIServerThreaded, SAPNIServerHandler, SAPNIClient
 # Custom imports
@@ -59,7 +60,11 @@ class SAPMSServerHandler(Loggeable, SAPNIServerHandler):
             ms = self.packet[SAPMS]
             flag = getattr(ms, "flag", None)
             iflag = getattr(ms, "iflag", None)
-            opcode = getattr(ms, "opcode", None)
+            body = ms.payload
+            if isinstance(body, (SAPMSPayload, SAPMSPeerPayload)):
+                opcode = body.opcode
+            else:
+                opcode = None
             fromname = getattr(ms, "fromname", "").strip()
             toname = getattr(ms, "toname", "").strip()
 

@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from scapy.packet import Raw
-from pysap.SAPMS import SAPMS
+from pysap.SAPMS import SAPMS, SAPMSPayload, SAPMSPeerPayload
 
 from honeysap.core.config import Configuration
 from honeysap.services.messageserver.messageserver import (
@@ -70,3 +70,30 @@ class MessageServerHandlerTest(unittest.TestCase):
         handler.handle_data()
         handler.session.add_event.assert_called_once()
         self.assertIsInstance(handler.request.send.call_args.args[0], SAPMS)
+
+    def test_message_server_records_opcode_from_structured_payload(self):
+        handler = SAPMSServerHandler.__new__(SAPMSServerHandler)
+        handler.packet = SAPMS(flag=2, iflag=1) / SAPMSPayload(opcode=5)
+        handler.request = Mock()
+        handler.session = Mock()
+        handler.client_address = ("127.0.0.1", 1)
+
+        handler.handle_data()
+
+        event = handler.session.add_event.call_args.kwargs["data"]
+        self.assertEqual(event["opcode"], 5)
+        self.assertEqual(event["opcode_name"], "MS_SERVER_LST")
+
+    def test_message_server_records_opcode_from_peer_payload(self):
+        handler = SAPMSServerHandler.__new__(SAPMSServerHandler)
+        handler.packet = (SAPMS(flag=2, iflag=0, toname="listener") /
+                          SAPMSPeerPayload(opcode=1, message=b"hello"))
+        handler.request = Mock()
+        handler.session = Mock()
+        handler.client_address = ("127.0.0.1", 1)
+
+        handler.handle_data()
+
+        event = handler.session.add_event.call_args.kwargs["data"]
+        self.assertEqual(event["opcode"], 1)
+        self.assertEqual(event["opcode_name"], "MS_SERVER_CHG")
