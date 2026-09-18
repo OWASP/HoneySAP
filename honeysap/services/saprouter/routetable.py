@@ -16,6 +16,7 @@
 #
 
 # Standard imports
+import re
 
 # External imports
 # Custom imports
@@ -43,6 +44,7 @@ class RouteTable(Loggeable):
     MODE_ANY = -1
     MODE_RAW = 1
     MODE_NI = 0
+    MAX_EXPANDED_ENTRIES = 4096
     # TODO: Implement route_io mode
 
     def __init__(self, route_table):
@@ -87,26 +89,69 @@ class RouteTable(Loggeable):
             begin, end = ports.split("-")
         except (AttributeError, ValueError):
             begin, end = ports, ports
-
-        return range(int(begin), int(end) + 1)
+        try:
+            begin, end = int(begin), int(end)
+        except (TypeError, ValueError):
+            raise InvalidRouteTableEntry("Invalid port range")
+        if not 1 <= begin <= end <= 65535:
+            raise InvalidRouteTableEntry("Invalid port range")
+        return range(begin, end + 1)
 
     def parse_target_hosts(self, hosts, port):
         """Parses a list of hosts"""
-        if netaddr:
+        matcher = self._host_matcher(hosts)
+        for host in self._expanded_hosts(matcher):
+            yield host, port
+
+    def _host_matcher(self, hosts):
+        """Compile a destination once; large ranges remain bounded matchers."""
+        if not isinstance(hosts, str) or not hosts:
+            raise InvalidRouteTableEntry("Invalid target host")
+        if hosts == "*":
+            return None
+        if netaddr is None:
+            if "*" in hosts or "/" in hosts:
+                raise InvalidRouteTableEntry("Network ranges require netaddr")
+            return hosts
+        try:
+            if re.fullmatch(r"[0-9.*-]+", hosts) and ("*" in hosts or "-" in hosts):
+                return tuple(netaddr.glob_to_cidrs(hosts))
+            if "/" in hosts:
+                return (netaddr.IPNetwork(hosts),)
             if netaddr.valid_nmap_range(hosts):
-                for ip in netaddr.iter_nmap_range(hosts):
-                    yield str(ip), port
-            else:
-                for ip in netaddr.iter_unique_ips(hosts):
-                    yield str(ip), port
+                return (netaddr.IPNetwork(hosts),)
+        except (netaddr.AddrFormatError, ValueError) as exc:
+            raise InvalidRouteTableEntry("Invalid target range") from exc
+        return hosts
+
+    def _expanded_hosts(self, matcher):
+        """Expand only small concrete rules for legacy table consumers."""
+        if matcher is None:
+            return
+        if isinstance(matcher, str):
+            yield matcher
         else:
-            yield hosts, port
+            for network in matcher:
+                for address in network:
+                    yield str(address)
+
+    def _host_matches(self, matcher, host):
+        if matcher is None:
+            return True
+        if isinstance(matcher, str):
+            return matcher == host
+        try:
+            address = netaddr.IPAddress(host)
+        except (netaddr.AddrFormatError, ValueError):
+            return False
+        return any(address in network for network in matcher)
 
     def build_table(self, route_table):
         """Builds an internal structure for performing lookups on the
         route table.
         """
         self.table = {}
+        self.rules = []
         if route_table is None:
             self.logger.debug("Empty route table, denying everything")
             return self.table
@@ -122,9 +167,27 @@ class RouteTable(Loggeable):
                 continue
 
             # Expand ports and targets and store the data on the internal table
-            for port in self.parse_target_ports(port):
-                for (host, port) in self.parse_target_hosts(target, port):
-                    self.table[(host, port)] = (action, talk_mode, password)
+            try:
+                ports = self.parse_target_ports(port)
+            except InvalidRouteTableEntry:
+                continue
+            try:
+                matcher = self._host_matcher(target)
+            except InvalidRouteTableEntry:
+                continue
+            result = (action, talk_mode, password)
+            self.rules.append((matcher, ports, result))
+
+            if matcher is None:
+                host_count = self.MAX_EXPANDED_ENTRIES + 1
+            elif isinstance(matcher, str):
+                host_count = 1
+            else:
+                host_count = sum(network.size for network in matcher)
+            if host_count * len(ports) <= self.MAX_EXPANDED_ENTRIES:
+                for port in ports:
+                    for host in self._expanded_hosts(matcher):
+                        self.table.setdefault((host, port), result)
 
         self.logger.debug("Using route table: %s" % self.table)
 
@@ -133,9 +196,9 @@ class RouteTable(Loggeable):
         perform.
         """
 
-        # If the entry is present, return the info stored there
-        if (host, port) in self.table:
-            return self.table[(host, port)]
+        for matcher, ports, result in self.rules:
+            if port in ports and self._host_matches(matcher, host):
+                return result
 
         # Denies the connections by default if no matches on the table
         return self.ROUTE_DENY, self.MODE_ANY, None

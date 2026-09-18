@@ -26,6 +26,7 @@ from honeysap.core.logger import default_formatter
 class LogFeed(BaseFeed):
     """Log file based feed class"""
 
+    supports_consumption = False
     EVENT = 9
 
     @property
@@ -57,5 +58,5 @@ class LogFeed(BaseFeed):
         """Logs an event in the log file"""
         self.feed_logger.log(self.EVENT, repr(event))
 
-    def consume(self):
-        raise Exception("Log feed can't be consumed")
+    def consume(self, queue):
+        raise NotImplementedError("Log feed cannot be consumed")

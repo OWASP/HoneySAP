@@ -1,0 +1,20 @@
+# Standalone SAPRouter 9.16-compatible honeypot profile.
+# Empty route_table means deny by default; no backend is contacted.
+verbose: 0
+verbose_all: false
+colored_console: false
+datastore_class: MemoryDataStore
+services:
+  - service: SAPRouterService
+    enabled: true
+    listener_address: 0.0.0.0
+    listener_port: 3299
+    hostname: saprouter
+    release: 916
+    router_version: 40
+    router_version_patch: 7
+    external_admin: false
+    timeout: 5
+    route_table: []
+    # Import the build-specific response behavior separately from the service.
+    error_profile: !include error_profiles/saprouter-916.yml

@@ -16,6 +16,7 @@
 #
 
 # Standard imports
+from copy import deepcopy
 from uuid import uuid4
 # External imports
 from gevent.queue import Queue
@@ -50,6 +51,12 @@ class Session(Loggeable):
         """Add an event to the attack session."""
         if not isinstance(event, Event):
             event = Event(event, **kwargs)
+        elif event.session is not None:
+            # Reuse creates a separate queued event, even for the same session.
+            original = event
+            event = Event(original.event, data=deepcopy(original.data),
+                          request=original.request, response=original.response)
+            event.timestamp = original.timestamp
         event.session = self
         self.logger.debug("Received event %s", event)
         self.event_queue.put(event)

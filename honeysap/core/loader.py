@@ -18,8 +18,10 @@
 # Standard imports
 import sys
 import pkgutil
+import importlib
 import importlib.util
-from os.path import isabs, join, abspath, dirname
+from os import sep
+from os.path import commonpath, isabs, join, abspath, dirname, relpath
 from inspect import getmembers, isabstract, isclass
 # External imports
 
@@ -47,14 +49,26 @@ class ClassLoader(Loggeable):
 
     def load(self):
         self.logger.debug("Looking for modules in %s", self.directory)
-        for class_loader, class_modulename, _ in pkgutil.walk_packages([self.directory, ]):
+        package_root = abspath(join(dirname(__file__), ".."))
+        package_parent = dirname(package_root)
+        builtin_package = None
+        if commonpath((self.directory, package_root)) == package_root:
+            builtin_package = relpath(self.directory, package_parent).replace(sep, ".")
+        prefix = "%s." % builtin_package if builtin_package is not None else ""
+        for class_loader, class_modulename, _ in pkgutil.walk_packages([self.directory, ],
+                                                                      prefix=prefix):
             self.logger.debug("Found module %s", class_modulename)
 
-            spec = class_loader.find_spec(class_modulename, None)
-            class_module = importlib.util.module_from_spec(spec)
-            sys.modules[class_modulename] = class_module
-            spec.loader.exec_module(class_module)
+            if builtin_package is not None:
+                class_module = importlib.import_module(class_modulename)
+            else:
+                spec = class_loader.find_spec(class_modulename, None)
+                class_module = importlib.util.module_from_spec(spec)
+                sys.modules[class_modulename] = class_module
+                spec.loader.exec_module(class_module)
             for class_name, actual_class in getmembers(class_module, self.is_subclass):
+                if actual_class.__module__ != class_module.__name__:
+                    continue
 
                 self.logger.debug("Found class %s in module %s", class_name, class_modulename)
                 yield class_name, actual_class

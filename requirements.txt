@@ -1,4 +1,4 @@
-pysap>=0.1.20.dev0
+pysap @ git+https://github.com/OWASP/pysap.git@master
 flask>=2.0
 gevent>=21.1.0
 SQLAlchemy>=1.4.11

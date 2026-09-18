@@ -1,0 +1,117 @@
+# SAPRouter error-profile fragment. Import it as an error_profile value.
+fields:
+  counter: "1"
+  component: "NI (network interface)"
+  release: "$release"
+  version: "$router_version"
+  module: "nirout.cpp"
+  location: "SAProuter $router_version.$router_version_patch on '$hostname'"
+error_time_format: "%a %b %d %H:%M:%S %Y"
+partner_name_mode: loopback
+max_request_length: 10024
+oversized_request_error: true
+unknown_packet_error: false
+error_count:
+  enabled: true
+  start: 1
+  default_error_step: 1
+  version_request_step: 0
+  route_accept_step: 0
+  raw_unreachable_step: 0
+errors:
+  packet_too_big:
+    return_code: -93
+    error: "Network packet too big"
+    detail: "NiBufIIn: message length $request_length exceeds max ($max_request_length)"
+    module: "nibuf.cpp"
+    line: "3060"
+    count_step: 2
+  invalid_route:
+    return_code: -93
+    error: "internal error"
+    detail: "NiRRouteRepl: invalid route received"
+    module: "nirout.cpp"
+    line_by_reason:
+      no_hops: "2904"
+      no_hops_one_entry: "2897"
+      missing_route_bytes: "2836"
+      bad_length: "2869"
+      bad_entries: "2897"
+      zero_offset: "2904"
+      bad_offset: "2925"
+      bad_rest: "2925"
+    count_step: 1
+  route_version_old:
+    return_code: -96
+    error: "invalid client version"
+    detail: "NiRExRouteCon: version $route_ni_version too old"
+    module: "nirout.cpp"
+    line: "3045"
+    count_step: 1
+  host_empty:
+    return_code: -90
+    error: "hostname 'NiHLGetNodeAddr' unknown"
+    detail: "hostname empty"
+    module: "nixxhl.cpp"
+    line: "133"
+    count_step: 1
+  host_unknown:
+    return_code: -90
+    error: "hostname '$target_host' unknown"
+    detail: "NiPGetHostByName: '$target_host' not found"
+    module: "niuxi.c"
+    line: "1770"
+    system_call: "getaddrinfo"
+    count_step: 1
+  service_invalid:
+    return_code: -91
+    error: "service '$target_port' unknown"
+    count_step: 1
+  route_expected:
+    return_code: -93
+    error: "internal error"
+    detail: "NiRClientHandle: route expected"
+    module: "nirout.cpp"
+    count_step: 1
+  route_denied:
+    return_code: -94
+    error: "$hostname: route permission denied ($peer_ip to $target_host, $target_port)"
+    detail: ""
+    count_step: 1
+  partner_unreachable:
+    return_code: -92
+    error: "partner '$partner_host:$target_port' not reached"
+    detail: ""
+    module: "nirout.cpp"
+    line: ""
+    system_call: ""
+    errorno: ""
+    errorno_text: ""
+    count_step: 1
+  control_unknown:
+    return_code: -13
+    error: "invalid client version"
+    detail: "NiBufIProcMsg: unknown opcode $opcode received"
+    module: "nibuf.cpp"
+    line: "2399"
+    count_step: 1
+    count_after: 0
+  admin_info_denied:
+    return_code: -99
+    error: "info access denied ($peer_ip to localhost, $listener_port)"
+    count_step: 1
+  admin_denied:
+    return_code: -94
+    error: "Admin from remote denied"
+    count_step: 1
+  admin_password_denied:
+    return_code: -94
+    error: "route denied"
+    count_step: 1
+  timeout:
+    return_code: -5
+    error: "connection timed out"
+    detail: "RTPENDLIST::timeoutPend: no route received within ${timeout}s (CONNECTED)"
+    module: "nirout.cpp"
+    line: "6695"
+    count_step: 2

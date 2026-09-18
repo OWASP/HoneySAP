@@ -51,9 +51,9 @@ class SAPICMService(BaseHTTPService):
                               client_ip, flask_request.method, flask_request.path)
 
     def version_string(self):
-        release = str(self.server.config.get("release", self.default_release))
+        release = str(self.config.get("release", self.default_release))
         release = "%s.%s" % (release[0], release[1:])
-        icm_release = self.server.config.get("icm_release", release)
+        icm_release = self.config.get("icm_release", release)
 
         return "SAP NetWeaver Application Server %s / ICM %s" % (release,
                                                                  icm_release)

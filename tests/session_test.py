@@ -49,6 +49,32 @@ class SessionTest(unittest.TestCase):
         self.assertIsInstance(new_event, Event)
         self.assertEqual(new_event.event, event_str)
 
+    def test_event_keywords_and_reuse_across_sessions(self):
+        queue = Queue()
+        first = Session(queue, "first", "127.0.0.1", 1, "127.0.0.1", 2)
+        second = Session(queue, "second", "127.0.0.1", 3, "127.0.0.1", 4)
+        first.add_event("with fields", data={"key": ["value"]},
+                        request=b"request", response=b"response")
+        with_fields = queue.get(timeout=2)
+        self.assertEqual(with_fields.data, {"key": ["value"]})
+        self.assertEqual(with_fields.request, b"request")
+        self.assertEqual(with_fields.response, b"response")
+        first.add_event(with_fields)
+        second.add_event(with_fields)
+        same = queue.get(timeout=2)
+        other = queue.get(timeout=2)
+        self.assertIsNot(same, with_fields)
+        self.assertIs(same.session, first)
+        self.assertIs(other.session, second)
+        self.assertIs(with_fields.session, first)
+        self.assertIsNot(other, with_fields)
+        self.assertEqual(other.data, with_fields.data)
+        self.assertEqual(same.timestamp, with_fields.timestamp)
+        self.assertEqual(other.timestamp, with_fields.timestamp)
+        other.data["key"].append("second")
+        self.assertEqual(with_fields.data, {"key": ["value"]})
+        self.assertEqual(same.data, {"key": ["value"]})
+
 
 class SessionManagerTest(unittest.TestCase):
 
@@ -66,6 +92,9 @@ class SessionManagerTest(unittest.TestCase):
         self.assertEqual(session.source_port, 3200)
         self.assertEqual(session.target_ip, "127.0.0.1")
         self.assertEqual(session.target_port, 3201)
+        self.assertIs(session,
+                      session_manager.get_session("test", "127.0.0.1", 3200,
+                                                  "127.0.0.1", 3201))
         # Check that different sessions are created for other service/ip/ports
         another_session = session_manager.get_session("test", "127.0.0.1", 3200, "127.0.0.1", 3202)
         self.assertIsNot(session, another_session)

@@ -24,19 +24,11 @@ handling.  The following fields are recorded per request:
 - ``user_agent`` — ``User-Agent`` header value
 - ``host`` — ``Host`` header value
 
-**Realistic server identity**
-
-Responses include a ``Server`` header of the form::
-
-    SAP NetWeaver Application Server <release> / ICM <release>
-
-where ``<release>`` is the configured SAP release version.
-
 **SAP-branded error pages**
 
 All requests return SAP-styled HTML error pages (404 for unknown paths,
-400 for bad requests), indistinguishable from a real lightly-configured
-SAP NetWeaver system.
+400 for bad requests). The current implementation does not add a custom
+SAP ``Server`` header to Flask responses.
 
 
 Configuration options
@@ -44,18 +36,19 @@ Configuration options
 
 ``release``:
 
-SAP release version string used in the ``Server`` response header
-(e.g. ``"720"``).  Defaults to the global ``release`` setting.
+SAP release value used by ``version_string()``. Defaults to ``720``; it is
+not currently inserted into HTTP responses.
 
 ``icm_release``:
 
 Optional separate release version for the ICM component.  When omitted,
-the same value as ``release`` is used.
+the same value as ``release`` is used by ``version_string()``. It is not
+currently inserted into HTTP responses.
 
 ``hostname``:
 
-Hostname of the simulated SAP instance.  Used in error page details
-embedded in HTML responses.
+Hostname of the simulated SAP instance. The current ICM templates do not
+use this option.
 
 
 Example configuration

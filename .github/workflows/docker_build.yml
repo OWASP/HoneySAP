@@ -5,16 +5,23 @@ name: Build HoneySAP docker image
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
-   DOCKER_TAG: honeysap:development
+  DOCKER_TAG: honeysap:development
 
 jobs:
   build:
     name: Build docker image
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout HoneySAP
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Build docker image
         run: |
           docker build -t ${DOCKER_TAG} -f deployment/Dockerfile .

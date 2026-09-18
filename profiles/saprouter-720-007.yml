@@ -1,0 +1,19 @@
+# Standalone SAPRouter 7.20 patch 7-compatible honeypot profile.
+# Empty route_table means deny by default; no backend is contacted.
+verbose: 0
+verbose_all: false
+colored_console: false
+datastore_class: MemoryDataStore
+services:
+  - service: SAPRouterService
+    enabled: true
+    listener_address: 0.0.0.0
+    listener_port: 3299
+    hostname: saprouter
+    release: 720
+    router_version: 40
+    router_version_patch: 4
+    external_admin: false
+    timeout: 5
+    route_table: []
+    error_profile: !include error_profiles/saprouter-720-007.yml

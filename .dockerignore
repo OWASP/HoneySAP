@@ -1,0 +1,29 @@
+# Keep local checkout state and build outputs out of COPY . and the build context.
+.git/
+.github/
+.venv/
+.vscode/
+.vagrant/
+.pytest_cache/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+docs/
+tests/
+tools/
+deployment/
+logs/
+*.log
+*.sqlite
+*.pcap
+*.pcapng
+*.core
+uv.lock
+
+# Only bundled pysap source archives are needed by the optional offline path.
+pysap/**
+!pysap/dist/
+!pysap/dist/pysap-*.tar.gz

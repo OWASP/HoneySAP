@@ -17,7 +17,7 @@
 
 # Standard imports
 import unittest
-from os import path, remove
+from os import close, path, remove
 from tempfile import mkstemp
 # External imports
 from gevent.queue import Queue
@@ -35,12 +35,16 @@ class LogFeedsTest(unittest.TestCase):
 
     def test_logfeeds(self):
 
-        self.test_filename = mkstemp(".log", "logfeedstest")[1]
+        descriptor, self.test_filename = mkstemp(".log", "logfeedstest")
+        close(descriptor)
 
         # Register an event using the LogFeed
         configuration = Configuration({"feed": "LogFeed",
                                        "log_filename": self.test_filename})
         feed = LogFeed(configuration)
+        self.assertFalse(feed.supports_consumption)
+        with self.assertRaises(NotImplementedError):
+            feed.consume(Queue())
         event = Event("Test event")
         event.session = Session(Queue(), "test", "127.0.0.1", 3200,
                                 "127.0.0.1", 3201)
@@ -48,7 +52,9 @@ class LogFeedsTest(unittest.TestCase):
         feed.log(event)
         feed.stop()
 
-        self.assertIs(path.exists(self.test_filename), True)
+        with open(self.test_filename, encoding="utf-8") as log_file:
+            logged = log_file.read()
+        self.assertIn(repr(event), logged)
 
     def tearDown(self):
         if path.exists(self.test_filename):

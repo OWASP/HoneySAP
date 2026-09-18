@@ -57,8 +57,8 @@ SAP Message Server HTTP (``SAPMSHTTPService``)
 -----------------------------------------------
 
 HTTP-based Message Server endpoint on port 8100 (default).  SAP logon load
-balancing and web dispatcher clients contact this port to retrieve server
-lists and group information.
+balancing and web dispatcher clients may contact this port. Server-list and
+group-information endpoints are not implemented.
 
 
 Capabilities
@@ -70,7 +70,7 @@ All inbound HTTP requests are parsed and a session event is recorded:
 
 - Requests to paths beginning with ``/msgserver`` are recorded as
   ``MS HTTP request to msgserver`` with ``method``, ``path``,
-  ``user_agent``, and ``host``.
+  ``user_agent``, and ``host``; they receive HTTP 404.
 - All other paths are redirected to the ICM service (HTTP 301) and
   recorded as ``MS HTTP request redirected to ICM``.
 
@@ -82,14 +82,15 @@ is read from the co-configured ICM service; it defaults to 8000.
 
 **Realistic server identity**
 
-Responses include a ``Server`` header of the form::
+Redirect responses include a ``Server`` header of the form::
 
     SAP Message Server, release <release> (<instance>)
 
 **Robust HTTP parsing**
 
-The handler accepts HTTP/1.0, HTTP/1.1, and higher version strings to
-handle scanner and fuzzer traffic without crashing.
+The handler accepts HTTP/1.0 and HTTP/1.1 requests. Malformed request lines,
+overlong lines, and HTTP versions above 1.9 are rejected and the connection
+is closed.
 
 
 Configuration options
@@ -97,8 +98,8 @@ Configuration options
 
 ``release``:
 
-SAP release version string used in the ``Server`` response header
-(e.g. ``"720"``).
+Integer SAP release number used in the redirect ``Server`` response header
+(e.g. ``720``).
 
 ``instance``:
 
@@ -119,6 +120,6 @@ Example configuration
    enabled: yes
    listener_port: 8100
 
-   release: "720"
+   release: 720
    instance: PRD
    hostname: sapnw702

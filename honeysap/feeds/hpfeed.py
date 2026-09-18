@@ -49,12 +49,10 @@ class HPFeed(BaseFeed):
 
     @property
     def channels(self):
-        return self.config.get("channels", None)
+        return self.config.get("channels") or ["honeysap.events"]
 
     def setup(self):
         """Initializes the HPFeed connection"""
-        if self.channels is None:
-            self.channels = ["honeysap.events"]
         self.hpc = new_hpc(host=self.feed_host,
                            port=self.feed_port,
                            ident=self.ident,

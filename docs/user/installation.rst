@@ -12,25 +12,37 @@ The following are some basic instructions about how to install HoneySAP on diffe
 Using pip
 ---------
 
-Installing honeysap is simple with pip, after checking out the code, just run the following command on a terminal::
+HoneySAP requires Python 3.10 or newer. After checking out the source,
+create an isolated environment and install the package there::
 
-    python -m pip install .
+    python3 -m venv .venv
+    .venv/bin/python -m pip install --upgrade pip
+    .venv/bin/python -m pip install .
+
+The current package requires a compatible development version of ``pysap``.
+If it is not available from the configured package index, install ``pysap``
+from its source repository in the same environment before installing HoneySAP.
 
 
 Ubuntu 24.04
 ------------
 
-First step would be to install system packages that are required::
+Install the Python 3 runtime and virtual-environment support used by the
+Docker image::
 
-   sudo apt-get update && sudo apt-get install git python-pip python-dev build-essential
+   sudo apt-get update
+   sudo apt-get install git python3 python3-venv
 
-After having all the system packages ready, you can proceed to install HoneySAP::
+Then install HoneySAP into a virtual environment::
 
    cd /opt
-   git clone https://github.com/OWASP/honeysap
-   cd honeysap
-   python -m pip install .
+   git clone https://github.com/OWASP/HoneySAP.git honeysap
+   cd /opt/honeysap
+   python3 -m venv .venv
+   .venv/bin/python -m pip install --upgrade pip
+   .venv/bin/python -m pip install "git+https://github.com/OWASP/pysap.git"
+   .venv/bin/python -m pip install .
 
-The honeypot is then ready for being run::
+Run it from the source directory so relative profile paths resolve::
 
-   /opt/honeysap/bin/honeysap --config-file /opt/honeysap/honeysap.yml
+   .venv/bin/honeysap --config-file profiles/internal.yml

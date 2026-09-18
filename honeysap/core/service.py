@@ -20,7 +20,7 @@ from abc import abstractmethod, ABCMeta
 # External imports
 from flask.app import Flask
 from gevent.event import Event
-from gevent import spawn, wait, joinall
+from gevent import spawn, joinall
 from pysap.SAPNI import SAPNIServerThreaded, SAPNIServerHandler
 # Custom imports
 from .logger import Loggeable
@@ -98,6 +98,7 @@ class BaseTCPService(BaseService):
 
     def setup_server(self):
         super(BaseTCPService, self).setup_server()
+        self._started = False
 
         # Create the server and populate it with all the required objects
         # but do not bind and activate it yet
@@ -127,25 +128,30 @@ class BaseTCPService(BaseService):
         # Only run the server if it's not a virtual one.
         if not self.virtual:
             self.logger.debug("Waiting for clients")
+            self._started = True
             try:
                 self.server.serve_forever()
 
             except KeyboardInterrupt:
                 self.logger.warning("Canceled by the user")
-                self.stop()
+                raise
+            finally:
+                self._started = False
+                self.server.server_close()
 
     def stop(self):
         """Stops the server."""
-        # Only stop the server if it's not a virtual one.
-        if not self.virtual:
-            self.logger.debug("Stopping server")
+        self.logger.debug("Stopping server")
+        if self._started:
             self.server.shutdown()
+        self.server.server_close()
 
     def handle_virtual(self, client, client_address):
         """Handle virtual requests by creating a handler and passing to it the
         client socket and address."""
-        handler = self.handler_cls(client, client_address, self.server)
-        handler.handle()
+        # BaseRequestHandler.__init__ already calls setup(), handle(), and
+        # finish(); calling handle() again reads a closed client socket.
+        self.handler_cls(client, client_address, self.server)
 
 
 class BaseHTTPService(BaseService):
@@ -214,22 +220,32 @@ class ServiceManager(Loggeable):
 
         loader = ClassLoader([BaseService],
                              self.services_path)
-        for service_classname, service_cls in loader.load():
-            self.logger.debug("Found service %s, looking for configuration",
-                              service_classname)
+        try:
+            for service_classname, service_cls in loader.load():
+                self.logger.debug("Found service %s, looking for configuration",
+                                  service_classname)
 
-            service_configs = self.config.config_for("services", "service", service_classname)
-            self.logger.info("Found %d configuration(s) for %s",
-                             len(service_configs),
-                             service_classname)
+                service_configs = self.config.config_for("services", "service", service_classname)
+                self.logger.info("Found %d configuration(s) for %s",
+                                 len(service_configs),
+                                 service_classname)
 
-            for service_config in service_configs:
-                if service_config.get("enabled", False):
-                    service = service_cls(service_config,
-                                          self.datastore,
-                                          self.session_manager,
-                                          self)
-                    self.add_service(service)
+                for service_config in service_configs:
+                    if service_config.get("enabled", False):
+                        service = service_cls(service_config,
+                                              self.datastore,
+                                              self.session_manager,
+                                              self)
+                        self.add_service(service)
+        except Exception:
+            for service in self.services:
+                try:
+                    service.stop()
+                except Exception:
+                    self.logger.exception("Service cleanup failed after setup error")
+            self.services = []
+            self.stopped.set()
+            raise
 
     def find_services_by_name(self, name):
         """Returns an iterator of the registered services matching a given
@@ -249,6 +265,9 @@ class ServiceManager(Loggeable):
     def run(self):
         """Starts all the registered services"""
 
+        if self.stopped.is_set() or self.servers:
+            return
+
         for service in self.services:
             if service.enabled:
                 self.servers.append(spawn(service.run))
@@ -256,7 +275,7 @@ class ServiceManager(Loggeable):
 
         try:
             if len(self.servers) > 0 and not self.stopped.is_set():
-                wait()
+                joinall(self.servers, raise_error=True)
         except KeyboardInterrupt:
             self.logger.info('Stopping services')
             self.stop()
@@ -267,6 +286,14 @@ class ServiceManager(Loggeable):
     def stop(self):
         """Stops all started services"""
         if not self.stopped.is_set():
+            first_error = None
             for service in self.services:
-                service.stop()
+                try:
+                    service.stop()
+                except Exception as error:
+                    self.logger.exception("Service failed to stop: %s", service)
+                    if first_error is None:
+                        first_error = error
             self.stopped.set()
+            if first_error is not None:
+                raise first_error

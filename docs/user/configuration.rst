@@ -31,29 +31,31 @@ You can include another file from a configuration file.
 
 ``JSON``:
 
-You can use ``__include__`` as a special key for specify that you want to
-include a file. The file name would be taken from the value of that key and
-replaces by the content of the included  ``json`` file:
+Use ``!include`` as a special key whose string value is the path to a JSON
+file. The included content replaces the object containing that key:
 
 .. code-block:: json
 
     {
        "Some key":"Some value",
        "Some nested key":{
-          "__include__":"path_to_the_file_to_include.json"
+          "!include":"config/other.json"
        }
     }
 
 ``YAML``:
 
-You can use ``!include`` as a special keyword for specify the file you want
-to include. The content of the included ``yaml`` file will replace the value
-of the key:
+Use ``!include`` as a tag whose path points to a YAML file. Its content
+replaces the tagged value:
 
 .. code-block:: yaml
 
-   - Some key: Some value,
-     Some nested key: !include path_to_the_file_to_include.yml
+   Some key: Some value
+   Some nested key: !include config/other.yml
+
+Relative include paths are resolved against the file containing the include,
+not the current working directory. Includes can be nested; cyclic includes
+are rejected.
 
 Comments
 ''''''''
@@ -125,14 +127,8 @@ Miscellaneous configuration options:
    # Miscellaneous configuration
    # ---------------------------
    
-   # Enable reloading after a change in one of the configuration files
-   reload: false
-   
    # Data store class
    datastore_class: MemoryDataStore
-   
-   # Trace raw requests in feeds
-   trace_raw_requests: True
    
    # Address to listen for all services
    listener_address: 127.0.0.1
@@ -153,4 +149,13 @@ The following are configuration options related to the SAP instance:
    
    # Hostname
    hostname: sapnw702
-        
+
+
+Versioned behavior profiles
+---------------------------
+
+A service may expose a nested behavior or error profile when observable
+responses vary between product builds. Such profiles are ordinary service
+configuration, not a permanent registry of supported versions. The example
+files under ``profiles/`` can therefore change as emulation targets are added,
+updated, or retired.

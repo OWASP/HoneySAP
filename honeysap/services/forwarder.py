@@ -119,33 +119,34 @@ class ForwarderService(BaseService):
     def run(self):
         # If is not virtual, wait until a client connection arrives
         if not self.virtual:
-
-            try:
-                while not self.stopped.is_set():
-                    # Connects with the client
-                    (client, client_address) = self.listener.ins.accept()
-
-                    # Connects with the target
+            while not self.stopped.is_set():
+                try:
+                    client, client_address = self.listener.ins.accept()
+                except socket.error:
+                    if self.stopped.is_set():
+                        break
+                    raise
+                try:
                     remote = self.create_remote(client_address,
                                                 self.target_address,
                                                 self.target_port)
-
-                    # Handle the messages until the service is stopped
-                    try:
-                        while not self.stopped.is_set():
-                            self.handle(remote, client, client_address)
-                    # If a socket error was raised, we should continue
-                    # to allow other connections
-                    except socket.error as e:
-                        continue
-
-            # Other exceptions should be raised
-            except Exception as e:
-                raise e
+                except socket.error:
+                    client.close()
+                    continue
+                try:
+                    while not self.stopped.is_set():
+                        self.handle(remote, client, client_address)
+                except socket.error:
+                    pass
+                finally:
+                    remote.close()
+                    client.close()
 
     def stop(self):
         # Set the event as stopped
         self.stopped.set()
+        if hasattr(self, "listener"):
+            self.listener.close()
 
     def create_remote(self, client_address, host, port):
         # Creates a session for registering the events
@@ -161,7 +162,11 @@ class ForwarderService(BaseService):
                                                                        host, port))
         # Creates a remote socket
         remote = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        remote.connect((host, port))
+        try:
+            remote.connect((host, port))
+        except socket.error:
+            remote.close()
+            raise
 
         self.session.add_event("Connected to target", data={"target_host": host,
                                                             "target_port": port})
@@ -180,8 +185,10 @@ class ForwarderService(BaseService):
         try:
             while not self.stopped.is_set():
                 self.handle(remote, client, client_address)
-        except:
+        except socket.error:
             pass
+        finally:
+            remote.close()
 
     def handle(self, server, client, client_address):
         # Simple select bag with client and server sockets
@@ -194,7 +201,7 @@ class ForwarderService(BaseService):
     def recv_send(self, local, remote, request):
 
         # Receive data from the local peer
-        data = local.recv(self.mtu)
+        data = bytes(local.recv(self.mtu))
 
         # If we received zero bytes, the connection got down, raise the
         # exception so we can exit the loop and accept other clients
@@ -207,7 +214,6 @@ class ForwarderService(BaseService):
                             "target_port": self.target_port})
 
         # Add the entire packet to the event
-        data = str(data)
         if request:
             event.request = data
         else:
@@ -217,4 +223,4 @@ class ForwarderService(BaseService):
         self.session.add_event(event)
 
         # Send it to the remote peer
-        remote.send(data)
+        getattr(remote, "outs", remote).sendall(data)
