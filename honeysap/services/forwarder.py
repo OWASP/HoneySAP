@@ -127,15 +127,15 @@ class ForwarderService(BaseService):
                         break
                     raise
                 try:
-                    remote = self.create_remote(client_address,
-                                                self.target_address,
-                                                self.target_port)
+                    remote, session = self.create_remote(client_address,
+                                                         self.target_address,
+                                                         self.target_port)
                 except socket.error:
                     client.close()
                     continue
                 try:
                     while not self.stopped.is_set():
-                        self.handle(remote, client, client_address)
+                        self.handle(remote, client, client_address, session)
                 except socket.error:
                     pass
                 finally:
@@ -151,11 +151,11 @@ class ForwarderService(BaseService):
     def create_remote(self, client_address, host, port):
         # Creates a session for registering the events
         (client_ip, client_port) = client_address
-        self.session = self.session_manager.get_session("forwarder",
-                                                        client_ip,
-                                                        client_port,
-                                                        self.target_address,
-                                                        self.target_port)
+        session = self.session_manager.get_session("forwarder",
+                                                   client_ip,
+                                                   client_port,
+                                                   self.target_address,
+                                                   self.target_port)
 
         self.logger.debug("Connecting client %s:%s to remote %s:%d" % (client_ip,
                                                                        client_port,
@@ -168,37 +168,37 @@ class ForwarderService(BaseService):
             remote.close()
             raise
 
-        self.session.add_event("Connected to target", data={"target_host": host,
-                                                            "target_port": port})
+        session.add_event("Connected to target", data={"target_host": host,
+                                                        "target_port": port})
         # Wrap it into a StreamSocket so both remote and client are
         # StreamSockets
-        return StreamSocket(remote)
+        return StreamSocket(remote), session
 
     def handle_virtual(self, client, client_address):
 
         # Connects with the target
-        remote = self.create_remote(client_address,
-                                    self.target_address,
-                                    self.target_port)
+        remote, session = self.create_remote(client_address,
+                                             self.target_address,
+                                             self.target_port)
 
         # Handle the messages until the service is stopped
         try:
             while not self.stopped.is_set():
-                self.handle(remote, client, client_address)
+                self.handle(remote, client, client_address, session)
         except socket.error:
             pass
         finally:
             remote.close()
 
-    def handle(self, server, client, client_address):
+    def handle(self, server, client, client_address, session):
         # Simple select bag with client and server sockets
         r, __, __ = select([client, server], [], [], 0.5)
         if client in r:
-            self.recv_send(client, server, request=True)
+            self.recv_send(client, server, session, request=True)
         if server in r:
-            self.recv_send(server, client, request=False)
+            self.recv_send(server, client, session, request=False)
 
-    def recv_send(self, local, remote, request):
+    def recv_send(self, local, remote, session, request):
 
         # Receive data from the local peer
         data = bytes(local.recv(self.mtu))
@@ -220,7 +220,7 @@ class ForwarderService(BaseService):
             event.response = data
 
         # Register the event
-        self.session.add_event(event)
+        session.add_event(event)
 
         # Send it to the remote peer
         getattr(remote, "outs", remote).sendall(data)

@@ -19,7 +19,9 @@
 
 # Standard imports
 # External imports
-# Custom imports
+# Patch before importing feeds or their network dependencies.
+from gevent.monkey import patch_all
+patch_all()
 from honeysap.core.eater import HoneySAPEater
 
 

@@ -100,7 +100,8 @@ class DBFeedsTest(unittest.TestCase):
 
             self.assertEqual(len(results), 1)
             self.assertEqual(results[0][1], str(event.session.uuid))
-            self.assertEqual(results[0][2], str(event.timestamp))
+            self.assertEqual(results[0][2],
+                             str(event.timestamp.replace(tzinfo=None)))
             self.assertEqual(results[0][3], repr(event))
         finally:
             conn.close()

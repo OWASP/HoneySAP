@@ -11,6 +11,7 @@
 #
 
 import io
+import logging
 import os
 import unittest
 from builtins import open as builtin_open
@@ -20,6 +21,7 @@ from unittest.mock import Mock, patch
 from honeysap.core.config import Configuration
 from honeysap.core.eater import HoneySAPEater
 from honeysap.core.honeysap import HoneySAP
+from honeysap.core.logger import configure_stream_logger, default_formatter
 
 
 class EaterOrchestrationTest(unittest.TestCase):
@@ -87,6 +89,22 @@ class EaterOrchestrationTest(unittest.TestCase):
 
 
 class HoneySAPOrchestrationTest(unittest.TestCase):
+
+    def test_logger_setup_reuses_honeysap_owned_handler(self):
+        logger = logging.getLogger("honeysap.test_logger_setup")
+        logger.handlers = []
+        first = io.StringIO()
+        second = io.StringIO()
+        try:
+            configure_stream_logger(logger.name, logging.INFO, default_formatter, first)
+            configure_stream_logger(logger.name, logging.DEBUG, default_formatter, second)
+            handlers = [handler for handler in logger.handlers
+                        if getattr(handler, "_honeysap_stream_handler", False)]
+            self.assertEqual(len(handlers), 1)
+            self.assertIs(handlers[0].stream, second)
+            self.assertEqual(handlers[0].level, logging.DEBUG)
+        finally:
+            logger.handlers = []
 
     def setUp(self):
         self.honeysap = HoneySAP()

@@ -141,6 +141,9 @@ class ControlledService:
     def __init__(self, enabled=True):
         self.enabled = enabled
         self.alias = "controlled"
+        self.listener_address = "127.0.0.1"
+        self.listener_port = 0
+        self.virtual = False
         self.started = GreenletEvent()
         self.released = GreenletEvent()
         self.run_count = 0
@@ -184,8 +187,8 @@ class CoreConcurrencyTest(unittest.TestCase):
 
         with patch("honeysap.core.feed.spawn", tracked_spawn):
             manager.run()
-        self.assertEqual(len(workers), 1)
-        return workers[0]
+        self.assertEqual(len(workers), 1 + len(manager.feeds))
+        return manager.worker
 
     def stop_feed_worker(self, manager, worker):
         manager.stop()
@@ -213,6 +216,30 @@ class CoreConcurrencyTest(unittest.TestCase):
             self.stop_feed_worker(manager, worker)
         self.assertEqual(failing.stop_count, 1)
         self.assertEqual(recording.stop_count, 1)
+
+    def test_failing_feed_is_temporarily_disabled_after_threshold(self):
+        config = Configuration({"feed_failure_threshold": 1,
+                                "feed_retry_seconds": 60})
+        sessions = SessionManager(config)
+        manager = FeedManager(config, sessions)
+        failing = FailingFeed(config)
+        recording = RecordingFeed(config)
+        manager.add_feed(failing)
+        manager.add_feed(recording)
+        worker = self.start_feed_worker(manager)
+        try:
+            session = sessions.get_session("test", "127.0.0.1", 1,
+                                           "127.0.0.1", 2)
+            session.add_event("first")
+            self.assertEqual(recording.received.get(timeout=DEADLINE).event, "first")
+            with gevent.Timeout(DEADLINE):
+                while manager.metrics()["feeds"]["FailingFeed-1"]["disabled_until"] is None:
+                    gevent.sleep(0.01)
+            session.add_event("second")
+            self.assertEqual(recording.received.get(timeout=DEADLINE).event, "second")
+            self.assertEqual(manager.metrics()["feeds"]["FailingFeed-1"]["skipped"], 1)
+        finally:
+            self.stop_feed_worker(manager, worker)
 
     def test_feed_stop_is_idempotent(self):
         sessions, manager = self.make_feed_manager()

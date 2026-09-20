@@ -19,7 +19,9 @@
 
 # Standard imports
 # External imports
-# Custom imports
+# Patch before importing HoneySAP services, networking, or TLS modules.
+from gevent.monkey import patch_all
+patch_all()
 from honeysap.core.honeysap import HoneySAP
 
 

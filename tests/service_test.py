@@ -65,6 +65,19 @@ class ServiceManagerTest(unittest.TestCase):
             manager.stop()
         service.stop.assert_called_once_with()
 
+    def test_stop_reports_a_service_worker_that_cannot_terminate(self):
+        manager = ServiceManager(Configuration(), None, None)
+        manager.services = [Mock()]
+        worker = Mock(dead=False)
+        worker.kill.return_value = None
+        manager.servers = [worker]
+        with patch("honeysap.core.service.WORKER_STOP_TIMEOUT", 0.01):
+            with self.assertRaisesRegex(RuntimeError, "Service worker did not stop"):
+                manager.stop()
+        manager.services[0].stop.assert_called_once_with()
+        worker.join.assert_called_once_with(timeout=0.01)
+        worker.kill.assert_called_once_with(block=True, timeout=0.01)
+
     def test_partial_service_load_closes_created_services(self):
         created = []
         class TrackingService:
@@ -77,8 +90,10 @@ class ServiceManagerTest(unittest.TestCase):
                 raise ValueError("setup failed")
 
         config = Configuration({"services": [
-            {"service": "TrackingService", "enabled": True},
-            {"service": "FailingService", "enabled": True}]})
+            {"service": "TrackingService", "enabled": True,
+             "listener_port": 3200},
+            {"service": "FailingService", "enabled": True,
+             "listener_port": 3201}]})
         manager = ServiceManager(config, None, None)
         with patch("honeysap.core.service.ClassLoader") as loader:
             loader.return_value.load.return_value = [
@@ -89,6 +104,44 @@ class ServiceManagerTest(unittest.TestCase):
         created[0].stop.assert_called_once_with()
         self.assertEqual(manager.services, [])
         self.assertTrue(manager.stopped.is_set())
+
+    def test_topology_is_preflighted_before_any_service_is_constructed(self):
+        created = []
+
+        class TrackingService:
+            def __init__(self, *args):
+                created.append(self)
+
+        config = Configuration({"services": [
+            {"service": "TrackingService", "enabled": True,
+             "alias": "first", "listener_port": 3200},
+            {"service": "TrackingService", "enabled": True,
+             "alias": "second", "listener_port": 3200}]})
+        manager = ServiceManager(config, None, None)
+        with patch("honeysap.core.service.ClassLoader") as loader:
+            loader.return_value.load.return_value = [("TrackingService", TrackingService)]
+            with self.assertRaisesRegex(ValueError, "Duplicate service listener"):
+                manager.load_services()
+        self.assertEqual(created, [])
+
+    def test_topology_rejects_wildcard_listener_conflicts(self):
+        manager = ServiceManager(Configuration(), None, None)
+        with self.assertRaisesRegex(ValueError, "Conflicting service listener"):
+            manager._validate_topology([
+                ("all", "0.0.0.0", 3200, False),
+                ("specific", "127.0.0.1", 3200, False)])
+
+    def test_service_topology_rejects_duplicate_aliases_and_listeners(self):
+        manager = ServiceManager(Configuration(), None, None)
+        first = Mock(alias="first", listener_address="127.0.0.1", listener_port=3200)
+        same_alias = Mock(alias="first", listener_address="127.0.0.1", listener_port=3201)
+        manager.services = [first, same_alias]
+        with self.assertRaisesRegex(ValueError, "Duplicate service alias"):
+            manager.validate_topology()
+        same_alias.alias = "second"
+        same_alias.listener_port = 3200
+        with self.assertRaisesRegex(ValueError, "Duplicate service listener"):
+            manager.validate_topology()
 
     def test_tcp_service_stop_before_run_closes_without_shutdown(self):
         server = Mock()

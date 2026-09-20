@@ -44,6 +44,25 @@ class DummyFeed(BaseFeed):
 
 class FeedManagerTest(unittest.TestCase):
 
+    def test_metrics_use_unique_feed_ids_and_expose_queue_depth(self):
+        manager = FeedManager(Configuration(), SessionManager(Configuration()))
+        manager.add_feed(DummyFeed(Configuration()))
+        manager.add_feed(DummyFeed(Configuration()))
+        manager._start_feed_workers()
+        try:
+            metrics = manager.metrics()["feeds"]
+            self.assertEqual(set(metrics), {"DummyFeed-1", "DummyFeed-2"})
+            self.assertTrue(all("queued" in metric for metric in metrics.values()))
+        finally:
+            manager.stop()
+
+    def test_duplicate_configured_feed_ids_are_rejected(self):
+        manager = FeedManager(Configuration(), SessionManager(Configuration()))
+        manager.add_feed(DummyFeed(Configuration({"feed_id": "same"})))
+        manager.add_feed(DummyFeed(Configuration({"feed_id": "same"})))
+        with self.assertRaisesRegex(ValueError, "Duplicate feed_id"):
+            manager._start_feed_workers()
+
     def test_failed_feed_setup_closes_previously_loaded_feeds(self):
         class TrackingFeed(DummyFeed):
             def setup(self):
@@ -109,8 +128,8 @@ class FeedManagerTest(unittest.TestCase):
         feed_manager.add_feed(feed)
         workers = []
 
-        def tracked_spawn(callback):
-            worker = spawn(callback)
+        def tracked_spawn(callback, *args):
+            worker = spawn(callback, *args)
             workers.append(worker)
             return worker
 
@@ -127,10 +146,13 @@ class FeedManagerTest(unittest.TestCase):
         try:
             # A bounded receipt is deterministic and fails instead of hanging.
             self.assertIs(event, feed.events.get(timeout=2))
+            self.assertEqual(feed_manager.metrics()["processed"], 1)
+            self.assertEqual(feed_manager.metrics()["dropped"], 0)
         finally:
             feed_manager.stop()
-            workers[0].join(timeout=2)
-        self.assertTrue(workers[0].dead)
+            for worker in workers:
+                worker.join(timeout=2)
+        self.assertTrue(all(worker.dead for worker in workers))
 
 
 def test_suite():

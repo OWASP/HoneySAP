@@ -55,7 +55,8 @@ replaces the tagged value:
 
 Relative include paths are resolved against the file containing the include,
 not the current working directory. Includes can be nested; cyclic includes
-are rejected.
+are rejected. Includes must remain within the directory containing the root
+configuration file.
 
 Comments
 ''''''''
@@ -129,9 +130,45 @@ Miscellaneous configuration options:
    
    # Data store class
    datastore_class: MemoryDataStore
+
+   # Bounded event delivery and session lifecycle
+   event_queue_maxsize: 10000
+   feed_queue_maxsize: 1000
+   feed_failure_threshold: 5
+   feed_retry_seconds: 60
+   max_sessions: 10000
+   max_campaigns: 10000
+   session_ttl_seconds: 3600
+   campaign_window_seconds: 3600
    
    # Address to listen for all services
    listener_address: 127.0.0.1
+
+``event_queue_maxsize`` bounds events waiting for feeds (default ``10000``).
+When the queue is full, HoneySAP drops the newest event rather than blocking a
+network listener; the session and feed-manager metrics expose accepted,
+dropped, queued, processed, and feed-error counters. ``session_ttl_seconds``
+expires inactive connection sessions (default ``3600``). Sessions opened from
+the same source address within ``campaign_window_seconds`` (default ``3600``)
+share a campaign identifier; set the window to ``0`` to disable campaign
+grouping. Serialized events include a schema version, event ID, per-session
+sequence number, UTC timestamp, session ID, and campaign ID.
+``feed_queue_maxsize`` independently bounds each feed's delivery queue
+(default ``1000``), so a slow feed cannot delay another feed. Values whose
+configuration key names contain password, secret, token, credential, key, or
+certificate markers are redacted from startup logs; attacker-supplied event
+data is not redacted by this configuration safeguard. Binary event-data values
+are retained as explicit ``{"type": "bytes", "encoding": "base64",
+"value": "..."}`` objects rather than being decoded as text.
+``max_sessions`` and ``max_campaigns`` bound retained connection and campaign
+state (both default to ``10000``); the least recently active entry is evicted
+when either limit is reached. The DataStore receives only values explicitly
+listed under the top-level ``datastore:`` mapping, rather than the complete
+configuration.
+After ``feed_failure_threshold`` consecutive delivery failures (default ``5``),
+a feed is paused for ``feed_retry_seconds`` (default ``60``) before delivery is
+retried. Feed and service configurations receive only their own settings and
+safe shared defaults; sibling credentials are not propagated.
 
 
 SAP instance configuration
