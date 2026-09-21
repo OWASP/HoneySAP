@@ -76,6 +76,11 @@ The core components are:
 * **Data Store** provides an optional, explicitly configured shared state space
   with bounded asynchronous watcher delivery.
 
+In operation, an operator selects a profile and exposed services, services
+record attacker interactions as events, and feeds deliver those events to a
+console, log, database, or HPFeeds consumer. The honeypot does not make a
+captured request successful merely because it records it.
+
 The following diagram shows the current component layout:
 
 .. graphviz::

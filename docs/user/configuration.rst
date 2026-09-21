@@ -153,6 +153,45 @@ the same source address within ``campaign_window_seconds`` (default ``3600``)
 share a campaign identifier; set the window to ``0`` to disable campaign
 grouping. Serialized events include a schema version, event ID, per-session
 sequence number, UTC timestamp, session ID, and campaign ID.
+
+.. _event-correlation:
+
+Interpreting event correlation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Every serialized event has a ``session`` and ``campaign`` field. ``session``
+identifies one service connection and is the precise key for ordering its
+events by ``sequence``. ``campaign`` is a broader investigation aid: sessions
+from the same source address within ``campaign_window_seconds`` share it. It
+can group related scanning across services, but it is not an attacker identity
+because multiple actors can share an address (for example behind NAT).
+
+Forwarder events created after a SAPRouter handoff also include
+``parent_session``. Its value is the ``session`` ID of the SAPRouter connection
+that accepted the route, providing an exact join from forwarded traffic back
+to the route request. Directly exposed Forwarder events have an empty
+``parent_session`` because there is no upstream SAPRouter connection.
+
+For example, analysts can group a scan with ``campaign``, inspect each
+connection using ``session`` and ``sequence``, and join a routed Forwarder
+payload to its SAPRouter request by matching ``parent_session`` to the router
+event's ``session``.
+
+.. _event-contents:
+
+Reading event contents
+~~~~~~~~~~~~~~~~~~~~~~
+
+Use ``service`` and ``event`` to identify the protocol observation, then read
+``data`` for decoded fields specific to that event. ``request`` and
+``response`` retain the captured wire evidence as base64 text; decode them
+only when the event fields do not answer the investigation question. The
+``schema_version`` identifies the event format, while ``event_id`` identifies
+one emitted record.
+
+Service documentation lists its named events and detection-specific fields.
+Treat them as observations of an attempted action, not proof that a target
+operation succeeded.
 ``feed_queue_maxsize`` independently bounds each feed's delivery queue
 (default ``1000``), so a slow feed cannot delay another feed. Values whose
 configuration key names contain password, secret, token, credential, key, or
