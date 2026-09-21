@@ -102,6 +102,8 @@ services:
         release: 720
         instance: PRD
         hostname: sapnw702
+        # Redirect clients to the ICM authority they used to reach this service.
+        redirect_hostname: request
 
 
 # Feeds configuration
@@ -110,7 +112,7 @@ services:
 feeds:
     -
         feed: LogFeed
-        log_filename: honeysap-internal.log
+        log_filename: logs/honeysap-internal.log
         enabled: yes
     -
         feed: ConsoleFeed

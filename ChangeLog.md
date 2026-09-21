@@ -17,6 +17,8 @@
 
 ### Enhancements and improvements
 
+- Deployment: Deprecated the Vagrant and Ansible definitions; Docker Compose is
+  the supported self-contained deployment path.
 - `honeysap/core/`: Added bounded event and per-feed queues, session expiry
   and campaign correlation, versioned event metadata, safe YAML loading,
   redacted configuration logging, and bounded DataStore visibility
