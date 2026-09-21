@@ -89,7 +89,7 @@ class BaseService(Loggeable, metaclass=ABCMeta):
         """Stop the server"""
         pass
 
-    def handle_virtual(self, client, client_address):
+    def handle_virtual(self, client, client_address, route_context=None):
         """Handles a virtual socket using a socket connected to a client."""
         pass
 
@@ -149,7 +149,7 @@ class BaseTCPService(BaseService):
             self.server.shutdown()
         self.server.server_close()
 
-    def handle_virtual(self, client, client_address):
+    def handle_virtual(self, client, client_address, route_context=None):
         """Handle virtual requests by creating a handler and passing to it the
         client socket and address."""
         # BaseRequestHandler.__init__ already calls setup(), handle(), and

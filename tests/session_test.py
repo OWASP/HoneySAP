@@ -76,6 +76,17 @@ class SessionTest(unittest.TestCase):
         self.assertEqual(with_fields.data, {"key": ["value"]})
         self.assertEqual(same.data, {"key": ["value"]})
 
+    def test_session_preserves_explicit_route_lineage(self):
+        queue = Queue()
+        root = Session(queue, "saprouter", "127.0.0.1", 1,
+                       "127.0.0.1", 3299)
+        forwarded = Session(queue, "forwarder", "127.0.0.1", 1,
+                            "127.0.0.1", 22,
+                            campaign_uuid=root.campaign_uuid,
+                            parent_session_uuid=root.uuid)
+        self.assertEqual(forwarded.campaign_uuid, root.campaign_uuid)
+        self.assertEqual(forwarded.parent_session_uuid, root.uuid)
+
 
 class SessionManagerTest(unittest.TestCase):
 

@@ -109,6 +109,9 @@ class Event(object):
                            "sequence": self.sequence,
                            "session": str(self.session.uuid),
                            "campaign": str(self.session.campaign_uuid),
+                           "parent_session": (
+                               str(self.session.parent_session_uuid)
+                               if self.session.parent_session_uuid else ""),
                            "event": self.event,
                            "data": self._serialize_data(self.data),
                            "request": self._encode_field(self.request),

@@ -53,6 +53,7 @@ class EventTest(unittest.TestCase):
         self.assertEqual(event_json["timestamp"], event.timestamp.isoformat())
         self.assertEqual(event_json["session"], str(session.uuid))
         self.assertEqual(event_json["campaign"], str(session.campaign_uuid))
+        self.assertEqual(event_json["parent_session"], "")
         self.assertEqual(event_json["service"], session.service)
         self.assertEqual(event_json["source_ip"], session.source_ip)
         self.assertEqual(event_json["source_port"], session.source_port)

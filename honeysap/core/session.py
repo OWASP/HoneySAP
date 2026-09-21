@@ -31,7 +31,8 @@ class Session(Loggeable):
     """
 
     def __init__(self, event_queue, service, source_ip, source_port, target_ip,
-                 target_port, campaign_uuid=None, enqueue=None):
+                 target_port, campaign_uuid=None, enqueue=None,
+                 parent_session_uuid=None):
         """Initialize the attack session.
         """
         super(Session, self).__init__()
@@ -43,6 +44,7 @@ class Session(Loggeable):
         self.target_ip = target_ip
         self.target_port = target_port
         self.campaign_uuid = campaign_uuid or uuid4()
+        self.parent_session_uuid = parent_session_uuid
         self.enqueue = enqueue
         self.sequence = 0
         self.created_at = monotonic()
@@ -98,7 +100,7 @@ class SessionManager(Loggeable):
         self.logger.debug("Session manager initialized")
 
     def get_session(self, service, source_ip, source_port, target_ip,
-                    target_port):
+                    target_port, campaign_uuid=None, parent_session_uuid=None):
         """Obtain an attack session for a given service and a pair of source
         and destination addresses/ports. If the session is not found, it
         creates a new one."""
@@ -106,11 +108,12 @@ class SessionManager(Loggeable):
         key = (service, source_ip, source_port, target_ip, target_port)
         if key not in self.sessions:
             self._evict_sessions_if_needed()
-            campaign_uuid = self._campaign_for(source_ip)
+            campaign_uuid = campaign_uuid or self._campaign_for(source_ip)
             self.sessions[key] = Session(self.event_queue, service, source_ip,
                                          source_port, target_ip, target_port,
                                          campaign_uuid=campaign_uuid,
-                                         enqueue=self.enqueue_event)
+                                         enqueue=self.enqueue_event,
+                                         parent_session_uuid=parent_session_uuid)
             self.logger.debug("Session created for service '%s' on %s:%d client %s:%d",
                               service, target_ip, target_port, source_ip, source_port)
         session = self.sessions[key]

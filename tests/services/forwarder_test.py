@@ -15,6 +15,7 @@ from gevent.event import Event as GreenletEvent
 from scapy.packet import Raw
 
 from honeysap.core.config import Configuration
+from honeysap.core.session import SessionManager
 from honeysap.services.forwarder import ForwarderService
 
 class ForwarderServiceTest(unittest.TestCase):
@@ -64,16 +65,28 @@ class ForwarderServiceTest(unittest.TestCase):
                 service.create_remote(("127.0.0.1", 1), "example.invalid", 1234)
         outbound.close.assert_called_once_with()
 
+    def test_remote_session_carries_route_lineage(self):
+        service = self.make_forwarder()
+        service.session_manager = SessionManager(Configuration())
+        outbound = Mock()
+        context = {"campaign_uuid": "campaign-1",
+                   "parent_session_uuid": "router-session-1"}
+        with patch("honeysap.services.forwarder.socket.socket", return_value=outbound):
+            __, session = service.create_remote(("127.0.0.1", 1),
+                                                "example.invalid", 1234,
+                                                context)
+        self.assertEqual(session.campaign_uuid, "campaign-1")
+        self.assertEqual(session.parent_session_uuid, "router-session-1")
+
     def test_connection_sides_close_after_forwarding(self):
         service = self.make_forwarder()
         service.stopped = GreenletEvent()
         client = Mock()
         remote = Mock()
         session = Mock()
-        service.listener = SimpleNamespace(ins=Mock())
-        service.listener.ins.accept.return_value = (client, ("127.0.0.1", 1))
         service.create_remote = Mock(return_value=(remote, session))
         service.handle = Mock(side_effect=lambda *args: service.stopped.set())
-        service.run()
+        service.connections = set()
+        service._handle_client(client, ("127.0.0.1", 1), release_slot=False)
         client.close.assert_called_once_with()
         remote.close.assert_called_once_with()

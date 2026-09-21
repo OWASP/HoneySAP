@@ -455,6 +455,8 @@ class SAPRouterHandlerTest(unittest.TestCase):
                                          clients={handler.client_address:
                                                   SimpleNamespace(ni_version=None)})
         handler.session = Mock()
+        handler.session.campaign_uuid = "campaign-1"
+        handler.session.uuid = "router-session-1"
         handler.request = Mock()
         return handler
 
@@ -788,6 +790,9 @@ class SAPRouterHandlerTest(unittest.TestCase):
         self.assertTrue(stream.keep_alive)
         self.assertEqual(stream.max_frame_length, 4096)
         self.assertEqual(address, handler.client_address)
+        self.assertEqual(target.handle_virtual.call_args.kwargs["route_context"], {
+            "campaign_uuid": "campaign-1",
+            "parent_session_uuid": "router-session-1"})
 
     def test_router_raw_handoff_accepts_virtual_forwarder_without_server(self):
         handler = self.make_router_handler()
