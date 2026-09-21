@@ -20,6 +20,7 @@ from html import escape
 from socket import timeout
 from socketserver import ThreadingMixIn
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlsplit
 # External imports
 from pysap.SAPMS import (SAPMS, SAPMSPayload, SAPMSPeerPayload,
                          ms_flag_values, ms_iflag_values,
@@ -213,7 +214,7 @@ class SAPMSHTTPServerHandler(Loggeable, BaseHTTPRequestHandler):
 
     def build_301_to_icm(self):
         """Build a redirection to the ICM service"""
-        hostname = self.server.config.get("hostname", self.default_hostname)
+        hostname = self._redirect_hostname()
         try:
             icm_configs = self.server.config.config_for("services", "service", "SAPICMService")
             icm_port = icm_configs[0].get("listener_port", 8000)
@@ -248,6 +249,29 @@ The document has moved <A HREF="%s"> here</A>
             self.send_header("connection", "close")
         self.end_headers()
         self.wfile.write(body_bytes)
+
+    def _redirect_hostname(self):
+        """Return the configured ICM redirect hostname.
+
+        ``redirect_hostname: request`` preserves the authority the client used
+        for the Message Server HTTP request, making a container deployment
+        reachable without requiring a fictitious SAP hostname in client DNS.
+        """
+        configured = self.server.config.get(
+            "redirect_hostname",
+            self.server.config.get("hostname", self.default_hostname))
+        if configured != "request":
+            return configured
+
+        try:
+            hostname = urlsplit("//%s" % self.headers.get("Host", "")).hostname
+        except ValueError:
+            hostname = None
+        if not hostname:
+            return self.server.config.get("hostname", self.default_hostname)
+        if ":" in hostname:
+            return "[%s]" % hostname
+        return hostname
 
     def do_request(self):
         data = {
