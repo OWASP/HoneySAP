@@ -16,6 +16,7 @@
 #
 
 # Standard imports
+from datetime import timezone
 
 # External imports
 from sqlalchemy import create_engine
@@ -63,7 +64,7 @@ class DBFeed(BaseFeed):
         except Exception:
             self.engine.dispose()
             raise
-        self.logger.debug("Database connection created with '%s'", self.db_engine)
+        self.logger.debug("Database connection created")
 
     def stop(self):
         """Stops the database connection"""
@@ -75,8 +76,12 @@ class DBFeed(BaseFeed):
 
     def log(self, event):
         """Logs an event in the database"""
+        # SQLAlchemy's SQLite DateTime representation has no timezone field.
+        # Persist a deliberately naive *UTC* value for indexed queries; the
+        # serialized event remains the canonical timezone-aware record.
+        timestamp = event.timestamp.astimezone(timezone.utc).replace(tzinfo=None)
         dbevent = DBEvent(session=str(event.session.uuid),
-                          timestamp=event.timestamp,
+                          timestamp=timestamp,
                           event=repr(event))
         try:
             self.session.add(dbevent)

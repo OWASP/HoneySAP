@@ -246,7 +246,10 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
             # Native talk mode intentionally bypasses NI framing.
             stream_socket = StreamSocket(self.request.ins,
                                          getattr(target_server, "base_cls", None) or Raw)
-        target.handle_virtual(stream_socket, self.client_address)
+        target.handle_virtual(
+            stream_socket, self.client_address,
+            route_context={"campaign_uuid": self.session.campaign_uuid,
+                           "parent_session_uuid": self.session.uuid})
 
     def handle_route(self, pkt):
         """Handles route messages"""

@@ -18,6 +18,8 @@
 # Standard imports
 from abc import abstractmethod, ABCMeta
 # External imports
+from gevent import getcurrent, spawn
+from gevent.queue import Full, Queue
 # Custom imports
 from .logger import Loggeable
 from .loader import ClassLoader
@@ -25,6 +27,7 @@ from .loader import ClassLoader
 
 DATASTORE_DEFAULT = "MemoryDataStore"
 _VALUE_UNSET = object()
+WATCHER_QUEUE_MAXSIZE = 1000
 
 
 class DataStoreNotFound(Exception):
@@ -41,6 +44,9 @@ class BaseDataStore(Loggeable, metaclass=ABCMeta):
 
     def __init__(self):
         self.notifiers = {}
+        self._watch_queues = {}
+        self._watch_workers = {}
+        self.dropped_notifications = 0
 
     @abstractmethod
     def get_data(self, key):
@@ -61,6 +67,7 @@ class BaseDataStore(Loggeable, metaclass=ABCMeta):
             self.notifiers[key] = []
         if callback not in self.notifiers[key]:
             self.notifiers[key].append(callback)
+            self._start_watcher(callback)
         self.logger.debug("Registered watcher for key '%s'" % key)
 
     def unwatch_data(self, key, callback=None):
@@ -80,6 +87,45 @@ class BaseDataStore(Loggeable, metaclass=ABCMeta):
                 self.notifiers[key].remove(callback)
             except ValueError:
                 pass
+        self._stop_unused_watchers()
+
+    def _start_watcher(self, callback):
+        if callback in self._watch_workers:
+            return
+        queue = Queue(maxsize=WATCHER_QUEUE_MAXSIZE)
+        self._watch_queues[callback] = queue
+        self._watch_workers[callback] = spawn(self._dispatch_watcher, callback, queue)
+
+    def _dispatch_watcher(self, callback, queue):
+        while True:
+            key, value = queue.get()
+            try:
+                callback(key, value)
+            except Exception:
+                self.logger.exception("Watcher failed for key '%s'", key)
+            if not self._callback_active(callback):
+                self._watch_workers.pop(callback, None)
+                self._watch_queues.pop(callback, None)
+                return
+
+    def _callback_active(self, callback):
+        return any(callback in callbacks for callbacks in self.notifiers.values())
+
+    def _stop_unused_watchers(self):
+        for callback, worker in tuple(self._watch_workers.items()):
+            if not self._callback_active(callback):
+                if worker is getcurrent():
+                    continue
+                worker.kill(block=True)
+                del self._watch_workers[callback]
+                del self._watch_queues[callback]
+
+    def stop(self):
+        """Stop bounded asynchronous watcher dispatch."""
+        for worker in self._watch_workers.values():
+            worker.kill(block=True)
+        self._watch_workers = {}
+        self._watch_queues = {}
 
     def notify_data(self, key, value=_VALUE_UNSET):
         """Notifies that a value was modified triggering the registered
@@ -94,12 +140,14 @@ class BaseDataStore(Loggeable, metaclass=ABCMeta):
             if value is _VALUE_UNSET:
                 value = self.get_data(key)
 
-            # Callback each one of the watchers
+            # Dispatch each callback independently so a slow watcher cannot
+            # delay updates or another watcher's ordered delivery.
             for callback in tuple(self.notifiers[key]):
                 try:
-                    callback(key, value)
-                except Exception:
-                    self.logger.exception("Watcher failed for key '%s'", key)
+                    self._watch_queues[callback].put_nowait((key, value))
+                except Full:
+                    self.dropped_notifications += 1
+                    self.logger.warning("Watcher queue full for key '%s'", key)
 
     def load_config(self, config):
         """Loads data from a Configuration instance into the data store.
@@ -133,7 +181,14 @@ class DataStoreManager(Loggeable):
     def get_datastore(self):
         if self.datastore is None:
             datastore = self.datastore_cls()
-            datastore.load_config(self.config)
+            data = self.config.get("datastore", {})
+            if not isinstance(data, dict):
+                raise ValueError("datastore must be a mapping")
+            datastore.load_config(data)
             self.datastore = datastore
             self.logger.debug("Created data store %s" % self.datastore_classname)
         return self.datastore
+
+    def stop(self):
+        if self.datastore is not None:
+            self.datastore.stop()

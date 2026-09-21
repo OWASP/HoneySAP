@@ -36,12 +36,11 @@ RUN if find pysap/dist -name "pysap-*.tar.gz" 2>/dev/null | grep -q .; then \
 RUN python3 -m pip install . && \
     rm -rf /tmp/* /var/tmp/*
 
-# SAP Router     : 3299
 # SAP Dispatcher : 3200
 # SAP Gateway    : 3300
 # SAP ICM (HTTP) : 8000
 # SAP Msg Server : 3600
 # SAP MS (HTTP)  : 8100
-EXPOSE 3299 3200 3300 8000 3600 8100
+EXPOSE 3200 3300 8000 3600 8100
 
 CMD ["/opt/honeysap-venv/bin/honeysap", "--config-file", "profiles/internal.yml"]

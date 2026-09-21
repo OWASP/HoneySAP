@@ -3,6 +3,13 @@
 Services
 ========
 
+Choose services according to the interfaces that should be visible to an
+attacker. SAPRouter records route, administration, and virtual-service access;
+Forwarder exposes or routes bounded TCP relays; ICM and Message Server expose
+HTTP and SAP web-tier behavior; Dispatcher and Gateway expose SAP GUI and RFC
+protocols. Each service records observations through the same event and feed
+flow described in :doc:`../configuration`.
+
 Common configuration options
 ----------------------------
 

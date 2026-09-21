@@ -17,6 +17,19 @@
 
 ### Enhancements and improvements
 
+- Deployment: Deprecated the Vagrant and Ansible definitions; Docker Compose is
+  the supported self-contained deployment path.
+- `honeysap/core/`: Added bounded event and per-feed queues, session expiry
+  and campaign correlation, versioned event metadata, safe YAML loading,
+  redacted configuration logging, and bounded DataStore visibility
+  ([@martingalloar](https://github.com/martingalloar)).
+- Core configuration, feeds, services, and datastores: Isolated component
+  configuration, bounded watcher dispatch, added feed retry backoff, improved
+  parse diagnostics, and tightened service shutdown
+  ([@martingalloar](https://github.com/martingalloar)).
+- Core service startup: Added service-topology validation and moved gevent
+  monkey-patching to the command entrypoints
+  ([@martingalloar](https://github.com/martingalloar)).
 - `honeysap/services/dispatcher/`: Build Dispatcher passports with pysap's
   EPP implementation instead of manually constructing the structure
   ([@martingalloar](https://github.com/martingalloar)).
@@ -38,6 +51,9 @@
 
 ### Fixes
 
+- `honeysap/services/forwarder.py` and `honeysap/feeds/dbfeed.py`: Isolated
+  forwarded client sessions and normalized persisted event timestamps to UTC
+  ([@martingalloar](https://github.com/martingalloar)).
 - `honeysap/services/gateway/`: Updated the Gateway service for the current
   pysap RFC interfaces
   ([@martingalloar](https://github.com/martingalloar),

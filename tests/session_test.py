@@ -17,6 +17,7 @@
 
 # Standard imports
 import unittest
+from time import monotonic
 # External imports
 from gevent.queue import Queue
 # Custom imports
@@ -75,6 +76,17 @@ class SessionTest(unittest.TestCase):
         self.assertEqual(with_fields.data, {"key": ["value"]})
         self.assertEqual(same.data, {"key": ["value"]})
 
+    def test_session_preserves_explicit_route_lineage(self):
+        queue = Queue()
+        root = Session(queue, "saprouter", "127.0.0.1", 1,
+                       "127.0.0.1", 3299)
+        forwarded = Session(queue, "forwarder", "127.0.0.1", 1,
+                            "127.0.0.1", 22,
+                            campaign_uuid=root.campaign_uuid,
+                            parent_session_uuid=root.uuid)
+        self.assertEqual(forwarded.campaign_uuid, root.campaign_uuid)
+        self.assertEqual(forwarded.parent_session_uuid, root.uuid)
+
 
 class SessionManagerTest(unittest.TestCase):
 
@@ -95,6 +107,7 @@ class SessionManagerTest(unittest.TestCase):
         self.assertIs(session,
                       session_manager.get_session("test", "127.0.0.1", 3200,
                                                   "127.0.0.1", 3201))
+        self.assertIsNotNone(session.campaign_uuid)
         # Check that different sessions are created for other service/ip/ports
         another_session = session_manager.get_session("test", "127.0.0.1", 3200, "127.0.0.1", 3202)
         self.assertIsNot(session, another_session)
@@ -106,6 +119,39 @@ class SessionManagerTest(unittest.TestCase):
         self.assertIsNot(session, another_session)
         another_session = session_manager.get_session("service", "127.0.0.1", 3201, "127.0.0.1", 3201)
         self.assertIsNot(session, another_session)
+
+    def test_campaigns_expiry_and_bounded_delivery(self):
+        manager = SessionManager(Configuration({
+            "event_queue_maxsize": 1,
+            "session_ttl_seconds": 1,
+            "campaign_window_seconds": 60,
+        }))
+        first = manager.get_session("one", "192.0.2.1", 1, "127.0.0.1", 2)
+        second = manager.get_session("two", "192.0.2.1", 3, "127.0.0.1", 4)
+        self.assertEqual(first.campaign_uuid, second.campaign_uuid)
+        self.assertTrue(first.add_event("first"))
+        self.assertFalse(first.add_event("dropped"))
+        self.assertEqual(manager.event_queue_metrics(), {
+            "accepted": 1, "dropped": 1, "queued": 1, "maxsize": 1,
+            "active_sessions": 2, "active_campaigns": 1,
+            "evicted_sessions": 0, "evicted_campaigns": 0,
+        })
+        first.last_activity = monotonic() - 2
+        second.last_activity = monotonic() - 2
+        self.assertEqual(manager.expire_sessions(), 2)
+        self.assertFalse(manager.sessions)
+
+    def test_session_and_campaign_capacity_evicts_oldest_entries(self):
+        manager = SessionManager(Configuration({"max_sessions": 2,
+                                                "max_campaigns": 2}))
+        first = manager.get_session("one", "192.0.2.1", 1, "127.0.0.1", 2)
+        first.last_activity = monotonic() - 10
+        manager.get_session("two", "192.0.2.2", 1, "127.0.0.1", 2)
+        manager.get_session("three", "192.0.2.3", 1, "127.0.0.1", 2)
+        self.assertEqual(len(manager.sessions), 2)
+        self.assertEqual(len(manager.campaigns), 2)
+        self.assertEqual(manager.evicted_sessions, 1)
+        self.assertEqual(manager.evicted_campaigns, 1)
 
 
 def test_suite():

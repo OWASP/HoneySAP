@@ -41,6 +41,7 @@ release = version
 # ones.
 extensions = [
     'sphinx.ext.autodoc',
+    'sphinx.ext.graphviz',
     'myst_parser',
 ]
 

@@ -18,6 +18,14 @@ The destination IP address where the traffic will be forwarded.
 
 The destination TCP port where the traffic will be forwarded.
 
+``max_connections``:
+
+Maximum simultaneous forwarding relays, shared by directly exposed and
+SAPRouter-routed connections (default ``32``). Connections above the limit
+are closed. SAPRouter-routed forwarding carries
+the router campaign plus a ``parent_session`` field, which gives feeds an
+exact join to the accepting SAPRouter session.
+
 
 Example configuration
 ---------------------

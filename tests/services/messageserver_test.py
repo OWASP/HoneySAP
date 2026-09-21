@@ -48,6 +48,16 @@ class MessageServerHandlerTest(unittest.TestCase):
         self.assertNotIn(b"<script>", body)
         self.assertIn(b"&lt;script&gt;", body)
 
+    def test_message_server_redirect_can_use_request_host(self):
+        handler = self.make_ms_http_handler("/")
+        handler.server.config.redirect_hostname = "request"
+        handler.headers = {"Host": "honeysap.example:8100"}
+
+        handler.build_301_to_icm()
+
+        headers, _ = handler.wfile.getvalue().split(b"\r\n\r\n", 1)
+        self.assertIn(b"location: http://honeysap.example:8000/", headers)
+
     def test_message_server_endpoint_returns_a_response(self):
         handler = self.make_ms_http_handler("/msgserver")
         handler.do_request()

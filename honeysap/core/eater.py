@@ -17,15 +17,13 @@
 
 # Standard imports
 import sys
-import logging
 from optparse import OptionGroup
-# External imports
-from gevent.monkey import patch_all; patch_all()  # @IgnorePep8
 # Custom imports
 from .feed import FeedManager
 from .session import SessionManager
 from .config import ConfigurationParserFromFile
-from .logger import (Loggeable, default_formatter, colored_formatter)
+from .logger import (Loggeable, configure_stream_logger, default_formatter,
+                     colored_formatter)
 
 
 class HoneySAPEater(Loggeable):
@@ -78,15 +76,10 @@ class HoneySAPEater(Loggeable):
         else:
             formatter = default_formatter
 
-        logger = logging.getLogger(namespace)
-        logger.level = level
-        stream_handler = logging.StreamHandler(sys.stdout)
-        stream_handler.setFormatter(formatter)
-        stream_handler.setLevel(level)
-        logger.addHandler(stream_handler)
+        configure_stream_logger(namespace, level, formatter, sys.stdout)
 
         self.logger.debug("Logging configured")
-        self.logger.info("Using config: %s", self.config)
+        self.logger.info("Using config: %s", self.config.redacted())
 
     def setup_feeds(self):
         """Setup attack session feeds configured."""

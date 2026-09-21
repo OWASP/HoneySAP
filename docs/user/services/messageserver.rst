@@ -109,6 +109,13 @@ SAP instance name returned in the ``Server`` header (e.g. ``"PRD"``).
 
 Hostname used when constructing the ICM redirect URL.
 
+``redirect_hostname``:
+
+Optional redirect authority override. Set this to ``request`` to reuse the
+HTTP ``Host`` authority supplied by the client (with the ICM port substituted).
+This is useful for Docker deployments where the emulated hostname is not
+resolvable by the client.
+
 
 Example configuration
 ~~~~~~~~~~~~~~~~~~~~~
@@ -123,3 +130,4 @@ Example configuration
    release: 720
    instance: PRD
    hostname: sapnw702
+   redirect_hostname: request

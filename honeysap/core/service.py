@@ -20,11 +20,14 @@ from abc import abstractmethod, ABCMeta
 # External imports
 from flask.app import Flask
 from gevent.event import Event
-from gevent import spawn, joinall
+from gevent import getcurrent, spawn, joinall
 from pysap.SAPNI import SAPNIServerThreaded, SAPNIServerHandler
 # Custom imports
 from .logger import Loggeable
 from .loader import ClassLoader
+
+
+WORKER_STOP_TIMEOUT = 2
 
 
 class BaseService(Loggeable, metaclass=ABCMeta):
@@ -86,7 +89,7 @@ class BaseService(Loggeable, metaclass=ABCMeta):
         """Stop the server"""
         pass
 
-    def handle_virtual(self, client, client_address):
+    def handle_virtual(self, client, client_address, route_context=None):
         """Handles a virtual socket using a socket connected to a client."""
         pass
 
@@ -146,7 +149,7 @@ class BaseTCPService(BaseService):
             self.server.shutdown()
         self.server.server_close()
 
-    def handle_virtual(self, client, client_address):
+    def handle_virtual(self, client, client_address, route_context=None):
         """Handle virtual requests by creating a handler and passing to it the
         client socket and address."""
         # BaseRequestHandler.__init__ already calls setup(), handle(), and
@@ -221,6 +224,7 @@ class ServiceManager(Loggeable):
         loader = ClassLoader([BaseService],
                              self.services_path)
         try:
+            configured_services = []
             for service_classname, service_cls in loader.load():
                 self.logger.debug("Found service %s, looking for configuration",
                                   service_classname)
@@ -232,11 +236,13 @@ class ServiceManager(Loggeable):
 
                 for service_config in service_configs:
                     if service_config.get("enabled", False):
-                        service = service_cls(service_config,
-                                              self.datastore,
-                                              self.session_manager,
-                                              self)
-                        self.add_service(service)
+                        configured_services.append((service_classname, service_cls,
+                                                    service_config))
+            self._validate_configured_topology(configured_services)
+            for _, service_cls, service_config in configured_services:
+                service = service_cls(service_config, self.datastore,
+                                      self.session_manager, self)
+                self.add_service(service)
         except Exception:
             for service in self.services:
                 try:
@@ -246,6 +252,48 @@ class ServiceManager(Loggeable):
             self.services = []
             self.stopped.set()
             raise
+
+    def validate_topology(self):
+        """Reject ambiguous service aliases and routed listener targets."""
+        topology = [(service.alias, service.listener_address,
+                     service.listener_port, service.virtual)
+                    for service in self.services if service.enabled]
+        self._validate_topology(topology)
+
+    def _validate_configured_topology(self, configured_services):
+        topology = []
+        for service_name, _, service_config in configured_services:
+            topology.append((service_config.get("alias", service_name),
+                             service_config.get("listener_address", "127.0.0.1"),
+                             service_config.get("listener_port", 80),
+                             service_config.get("virtual", False)))
+        self._validate_topology(topology)
+
+    @staticmethod
+    def _listeners_conflict(first, second):
+        first_address, first_port = first
+        second_address, second_port = second
+        return first_port == second_port and (first_address == second_address or
+                                              first_address in ("0.0.0.0", "::") or
+                                              second_address in ("0.0.0.0", "::"))
+
+    def _validate_topology(self, topology):
+        aliases = set()
+        routed_listeners = set()
+        bound_listeners = []
+        for alias, address, port, virtual in topology:
+            if alias in aliases:
+                raise ValueError("Duplicate service alias: %s" % alias)
+            aliases.add(alias)
+            listener = (address, port)
+            if listener in routed_listeners:
+                raise ValueError("Duplicate service listener: %s:%s" % listener)
+            routed_listeners.add(listener)
+            if not virtual:
+                if any(self._listeners_conflict(listener, existing)
+                       for existing in bound_listeners):
+                    raise ValueError("Conflicting service listener: %s:%s" % listener)
+                bound_listeners.append(listener)
 
     def find_services_by_name(self, name):
         """Returns an iterator of the registered services matching a given
@@ -268,6 +316,8 @@ class ServiceManager(Loggeable):
         if self.stopped.is_set() or self.servers:
             return
 
+        self.validate_topology()
+
         for service in self.services:
             if service.enabled:
                 self.servers.append(spawn(service.run))
@@ -280,6 +330,9 @@ class ServiceManager(Loggeable):
             self.logger.info('Stopping services')
             self.stop()
             raise KeyboardInterrupt
+        except Exception:
+            self.stop()
+            raise
         finally:
             joinall(self.servers, 2)
 
@@ -295,5 +348,13 @@ class ServiceManager(Loggeable):
                     if first_error is None:
                         first_error = error
             self.stopped.set()
+            for worker in self.servers:
+                if worker is getcurrent():
+                    continue
+                worker.join(timeout=WORKER_STOP_TIMEOUT)
+                if not worker.dead:
+                    worker.kill(block=True, timeout=WORKER_STOP_TIMEOUT)
+                if not worker.dead and first_error is None:
+                    first_error = RuntimeError("Service worker did not stop")
             if first_error is not None:
                 raise first_error

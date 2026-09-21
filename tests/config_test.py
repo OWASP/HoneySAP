@@ -93,6 +93,15 @@ class ConfigurationTest(unittest.TestCase):
         self.assertIs(value, config.get("nested"))
         self.assertEqual(["nested.json"], value["_config_files"])
 
+    def test_redacted_configuration_hides_only_sensitive_configuration_values(self):
+        config = Configuration({"feed_secret": "secret", "password": "password",
+                                "ordinary": "visible", "nested": {"token": "value"}})
+        rendered = config.redacted()
+        self.assertNotIn("'secret'", rendered)
+        self.assertNotIn("'value'", rendered)
+        self.assertIn("visible", rendered)
+        self.assertIn("***REDACTED***", rendered)
+
     def test_config_for(self):
         """Test the config_for method lookup."""
 
@@ -112,6 +121,39 @@ class ConfigurationTest(unittest.TestCase):
         self.assertListEqual([{self.key: self.value,
                                self.new_key: self.new_new_value}],
                              config.config_for(self.new_key, self.new_key, self.new_new_value))
+
+    def test_component_configurations_exclude_sibling_secrets(self):
+        config = Configuration({"shared": "value", "feeds": [
+            {"feed": "FirstFeed", "enabled": True, "feed_secret": "first"},
+            {"feed": "SecondFeed", "enabled": True, "feed_secret": "second"}],
+            "services": [{"service": "SAPICMService", "enabled": True,
+                          "listener_port": 8000, "service_password": "private"}]})
+        feed = config.config_for("feeds", "feed", "FirstFeed")[0]
+        self.assertEqual(feed.get("shared"), "value")
+        self.assertEqual(feed.get("feed_secret"), "first")
+        self.assertIsNone(feed.get("feeds"))
+        self.assertIsNone(feed.get("services"))
+        service = config.config_for("services", "service", "SAPICMService")[0]
+        self.assertEqual(service.get("service_password"), "private")
+        self.assertEqual(service.get("services"), [{"service": "SAPICMService",
+                                                      "enabled": True,
+                                                      "listener_port": 8000}])
+
+    def test_parse_error_reports_the_configuration_filename(self):
+        filename = self.make_temp_file()
+        with open(filename, 'w') as fd:
+            fd.write("invalid: [")
+        with self.assertRaisesRegex(ConfigurationParserNotFound, filename):
+            Configuration().update(filename, from_file=True)
+
+    def test_includes_cannot_escape_the_configuration_root(self):
+        directory = self.make_temp_dir()
+        filename = os.path.join(directory, "config.yml")
+        with open(filename, 'w') as fd:
+            fd.write("value: !include ../outside.yml\n")
+        with self.assertRaisesRegex(ConfigurationParserNotFound,
+                                    "outside configuration root"):
+            Configuration().update(filename, from_file=True)
 
     def test_config_parsers(self):
         """Test the update from a file."""
@@ -181,6 +223,13 @@ class ConfigurationTest(unittest.TestCase):
 
         self.assertListEqual([test_filename_include, test_filename],
                              config.get_config_files())
+
+    def test_yaml_rejects_python_object_constructors(self):
+        test_filename = self.make_temp_file()
+        with open(test_filename, 'w') as fd:
+            fd.write("value: !!python/tuple [1, 2]\n")
+        with self.assertRaises(ConfigurationParserNotFound):
+            Configuration().update(test_filename, from_file=True)
 
     def test_config_json_include(self):
         """Test json custom include directive."""
