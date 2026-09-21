@@ -108,7 +108,7 @@ jobs:
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y pandoc texlive-latex-base
+          sudo apt-get install -y graphviz pandoc texlive-latex-base
       - name: Install pysap
         run: |
           uv pip install --system "git+https://github.com/OWASP/pysap.git"
