@@ -16,6 +16,7 @@
 #
 
 # Standard imports
+import os
 import logging
 # External imports
 # Custom imports
@@ -36,6 +37,10 @@ class LogFeed(BaseFeed):
     def setup(self):
         """Initializes the log file"""
         logging.addLevelName(self.EVENT, "EVENT")
+
+        log_dir = os.path.dirname(self.log_filename)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
 
         self.logfile_handler = logging.FileHandler(self.log_filename)
         self.logfile_handler.setFormatter(default_formatter)
