@@ -83,7 +83,6 @@ setup(name=read_metadata("__title__"),  # Package information
       long_description=long_description,
       long_description_content_type="text/markdown",
       url=read_metadata("__url__"),
-      download_url=read_metadata("__url__"),
       license=read_metadata("__license__"),
       classifiers=['Development Status :: 3 - Alpha',
                    'Intended Audience :: Developers',
@@ -100,6 +99,7 @@ setup(name=read_metadata("__title__"),  # Package information
       python_requires='>=3.10',
       # Packages list
       packages=find_packages(),
+      package_data={'honeysap.services.icm': ['templates/*.html']},
       provides=['honeysap'],
 
       # Script files

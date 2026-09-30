@@ -57,9 +57,6 @@ docs/api/honeysap.*rst
 # PyBuilder
 target/
 
-# Vagrant
-.vagrant
-
 # IDEs
 .idea
 .project

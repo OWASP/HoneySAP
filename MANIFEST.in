@@ -1,1 +1,9 @@
+include COPYING ChangeLog.md README.md SECURITY.md
 include requirements*.txt
+recursive-include data *.csv
+recursive-include profiles *.yml
+recursive-include docs *.md *.rst Makefile make.bat
+prune docs/_build
+exclude docs/api/honeysap.*.rst
+exclude docs/api/honeysap.rst
+recursive-include honeysap/services/icm/templates *.html
