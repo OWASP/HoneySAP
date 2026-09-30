@@ -17,7 +17,7 @@
 
 # Standard imports
 from threading import Lock
-from logging import getLogger, ERROR, WARNING, INFO, DEBUG, Formatter
+from logging import StreamHandler, getLogger, ERROR, WARNING, INFO, DEBUG, Formatter
 # External imports
 # Custom imports
 # Optional imports
@@ -33,6 +33,25 @@ _loggeable_lock = Lock()
 
 # Declare default formatter for logs
 default_formatter = Formatter('%(name)s - %(asctime)-15s - %(levelname)-8s - %(message)s')
+
+
+def configure_stream_logger(namespace, level, formatter, stream):
+    """Configure one HoneySAP-owned stream handler for a logger namespace."""
+    logger = getLogger(namespace)
+    logger.setLevel(level)
+    for handler in logger.handlers:
+        if getattr(handler, "_honeysap_stream_handler", False):
+            handler.setLevel(level)
+            handler.setFormatter(formatter)
+            if handler.stream is not stream:
+                handler.setStream(stream)
+            return logger
+    handler = StreamHandler(stream)
+    handler._honeysap_stream_handler = True
+    handler.setFormatter(formatter)
+    handler.setLevel(level)
+    logger.addHandler(handler)
+    return logger
 
 # Declare colored formatter if the requirement is available
 if colorlog:

@@ -16,12 +16,12 @@
 #
 
 # Standard imports
+from datetime import timezone
 
 # External imports
 from sqlalchemy import create_engine
 from sqlalchemy.schema import Column
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.types import Integer, DateTime, String, Text
 # Custom imports
 from honeysap.core.feed import BaseFeed
@@ -43,6 +43,8 @@ class DBFeed(BaseFeed):
     """ Database based feed class
     """
 
+    supports_consumption = False
+
     @property
     def db_engine(self):
         return self.config.get("db_engine")
@@ -55,23 +57,38 @@ class DBFeed(BaseFeed):
         """Initializes the database connection"""
         self.engine = create_engine(self.db_engine,
                                     echo=self.db_echo)
-        Base.metadata.create_all(self.engine)
-        Session = sessionmaker(bind=self.engine)
-        self.session = Session()
-        self.logger.debug("Database connection created with '%s'", self.db_engine)
+        try:
+            Base.metadata.create_all(self.engine)
+            Session = sessionmaker(bind=self.engine)
+            self.session = Session()
+        except Exception:
+            self.engine.dispose()
+            raise
+        self.logger.debug("Database connection created")
 
     def stop(self):
         """Stops the database connection"""
-        self.session.close_all()
+        try:
+            self.session.close()
+        finally:
+            self.engine.dispose()
         self.logger.debug("Closed database session")
 
     def log(self, event):
         """Logs an event in the database"""
+        # SQLAlchemy's SQLite DateTime representation has no timezone field.
+        # Persist a deliberately naive *UTC* value for indexed queries; the
+        # serialized event remains the canonical timezone-aware record.
+        timestamp = event.timestamp.astimezone(timezone.utc).replace(tzinfo=None)
         dbevent = DBEvent(session=str(event.session.uuid),
-                          timestamp=event.timestamp,
+                          timestamp=timestamp,
                           event=repr(event))
-        self.session.add(dbevent)
-        self.session.commit()
+        try:
+            self.session.add(dbevent)
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
 
     def consume(self, queue):
-        pass
+        raise NotImplementedError("Database feed cannot be consumed")

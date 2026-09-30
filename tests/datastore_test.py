@@ -18,6 +18,7 @@
 # Standard imports
 import unittest
 # External imports
+import gevent
 
 # Custom imports
 from honeysap.core.config import Configuration
@@ -28,28 +29,36 @@ from honeysap.core.datastore import (BaseDataStore,
                                      DataStoreKeyNotFound)
 
 
-datasore_data = {}
-
-
 class BaseDataStoreTest(unittest.TestCase):
 
     key = "SomeKey"
     value = "SomeValue"
     new_value = "SomeNewValue"
 
+    def wait_for(self, predicate):
+        with gevent.Timeout(2):
+            while not predicate():
+                gevent.sleep(0.01)
+
     class DummyDataStore(BaseDataStore):
-        """Dummy Data Store backend using an external dict for storing the data.
-        """
+        """Small backend that preserves the base notification contract."""
+
+        def __init__(self):
+            super().__init__()
+            self.data = {}
+
         def get_data(self, key):
-            return datasore_data[key]
+            return self.data[key]
 
         def put_data(self, key, value):
-            datasore_data[key] = value
+            self.data[key] = value
+            super().put_data(key, value)
 
     def test_datastore_load_config(self):
         """Test loading the datastore with the config data."""
 
         dummy = self.DummyDataStore()
+        self.addCleanup(dummy.stop)
         config = Configuration({self.key: self.value})
         dummy.load_config(config)
 
@@ -59,36 +68,122 @@ class BaseDataStoreTest(unittest.TestCase):
         """Test the Data Store watch method."""
 
         dummy = self.DummyDataStore()
+        self.addCleanup(dummy.stop)
 
+        calls = []
         def callback1(call_key, call_value):
-            self.assertEqual(self.key, call_key)
-            self.assertEqual(self.value, call_value)
-
+            calls.append(("first", call_key, call_value))
         def callback2(call_key, call_value):
-            self.assertEqual(self.key, call_key)
-            self.assertEqual(self.value, call_value)
-
-        def callback3(call_key, call_value):
-            self.assertEqual(self.key, call_key)
-            self.assertEqual(self.new_value, call_value)
+            calls.append(("second", call_key, call_value))
 
         dummy.watch_data(self.key, callback1)
         # Check calling of the callback on the initial put
         dummy.put_data(self.key, self.value)
+        self.wait_for(lambda: len(calls) == 1)
         self.assertEqual(self.value, dummy.get_data(self.key))
+        self.assertEqual(calls, [("first", self.key, self.value)])
         # Check calling of the callback on following puts
         dummy.put_data(self.key, self.value)
+        self.wait_for(lambda: len(calls) == 2)
         self.assertEqual(self.value, dummy.get_data(self.key))
+        self.assertEqual(len(calls), 2)
         # Check adding a new callback function
         dummy.watch_data(self.key, callback2)
         dummy.put_data(self.key, self.value)
+        self.wait_for(lambda: len(calls) == 4)
         self.assertEqual(self.value, dummy.get_data(self.key))
+        self.assertCountEqual(calls[-2:], [("first", self.key, self.value),
+                                           ("second", self.key, self.value)])
         # Check changing the callback functions and putting new data
         dummy.unwatch_data(self.key, callback1)
-        dummy.unwatch_data(self.key, callback2)
-        dummy.watch_data(self.key, callback3)
         dummy.put_data(self.key, self.new_value)
+        self.wait_for(lambda: len(calls) == 5)
         self.assertEqual(self.new_value, dummy.get_data(self.key))
+        self.assertEqual(calls[-1], ("second", self.key, self.new_value))
+        count = len(calls)
+        dummy.unwatch_data(self.key)
+        dummy.put_data(self.key, None)
+        self.assertEqual(len(calls), count)
+        dummy.watch_data(self.key, callback1)
+        dummy.put_data(self.key, None)
+        self.wait_for(lambda: len(calls) == count + 1)
+        self.assertEqual(calls[-1], ("first", self.key, None))
+        dummy.unwatch_data(self.key, callback1)
+        dummy.unwatch_data(self.key, callback1)
+        dummy.put_data(self.key, self.value)
+        self.assertEqual(len(calls), count + 1)
+
+    def test_watchers_are_isolated_by_key_and_failure(self):
+        dummy = self.DummyDataStore()
+        self.addCleanup(dummy.stop)
+        calls = []
+        def failing(key, value):
+            raise ValueError("synthetic watcher failure")
+        def recording(key, value):
+            calls.append((key, value))
+
+        dummy.watch_data(self.key, failing)
+        dummy.watch_data(self.key, recording)
+        dummy.watch_data("other", recording)
+        dummy.put_data(self.key, self.value)
+        self.wait_for(lambda: len(calls) == 1)
+        self.assertEqual(calls, [(self.key, self.value)])
+        dummy.put_data("other", 2)
+        self.wait_for(lambda: len(calls) == 2)
+        self.assertEqual(calls[-1], ("other", 2))
+        self.assertEqual(len(calls), 2)
+
+    def test_explicit_none_notification_and_implicit_lookup(self):
+        dummy = self.DummyDataStore()
+        self.addCleanup(dummy.stop)
+        calls = []
+        dummy.watch_data(self.key, lambda key, value: calls.append((key, value)))
+        # Explicit None must not require the key to be stored first.
+        dummy.notify_data(self.key, None)
+        self.wait_for(lambda: len(calls) == 1)
+        self.assertEqual(calls, [(self.key, None)])
+        dummy.put_data(self.key, self.value)
+        dummy.notify_data(self.key)
+        self.wait_for(lambda: len(calls) == 3)
+        self.assertEqual(calls[-1], (self.key, self.value))
+
+    def test_watch_changes_during_notification_apply_to_next_put(self):
+        dummy = self.DummyDataStore()
+        self.addCleanup(dummy.stop)
+        calls = []
+        def first(key, value):
+            calls.append("first")
+            dummy.unwatch_data(key, first)
+            dummy.watch_data(key, third)
+        def second(key, value):
+            calls.append("second")
+        def third(key, value):
+            calls.append("third")
+
+        dummy.watch_data(self.key, first)
+        dummy.watch_data(self.key, first)  # Duplicate registration is ignored.
+        dummy.watch_data(self.key, second)
+        dummy.put_data(self.key, self.value)
+        self.wait_for(lambda: len(calls) == 2)
+        self.assertEqual(calls, ["first", "second"])
+        dummy.put_data(self.key, self.new_value)
+        self.wait_for(lambda: len(calls) == 4)
+        self.assertEqual(calls, ["first", "second", "second", "third"])
+
+    def test_slow_watcher_does_not_block_other_watchers_or_writers(self):
+        dummy = self.DummyDataStore()
+        self.addCleanup(dummy.stop)
+        blocking = gevent.event.Event()
+        received = []
+
+        def slow(key, value):
+            blocking.wait()
+
+        dummy.watch_data(self.key, slow)
+        dummy.watch_data(self.key, lambda key, value: received.append(value))
+        dummy.put_data(self.key, self.value)
+        self.wait_for(lambda: received == [self.value])
+        blocking.set()
 
 
 class MemoryDataStoreTest(unittest.TestCase):
@@ -104,11 +199,33 @@ class MemoryDataStoreTest(unittest.TestCase):
         memory = MemoryDataStore()
         memory.put_data(self.key, self.value)
         self.assertEqual(self.value, memory.get_data(self.key))
-        with self.assertRaises(DataStoreKeyNotFound):
+        with self.assertRaisesRegex(DataStoreKeyNotFound, "InexistentKey"):
             memory.get_data("InexistentKey")
 
 
 class DataStoreManagerTest(unittest.TestCase):
+
+    def test_failed_load_is_not_cached_and_can_be_retried(self):
+        manager = DataStoreManager(Configuration({"sample": "private",
+                                                  "datastore": {"sample": "value"}}))
+        backend_cls = manager.datastore_cls
+        class FlakyBackend(backend_cls):
+            attempts = 0
+
+            def load_config(self, config):
+                type(self).attempts += 1
+                if type(self).attempts == 1:
+                    raise ValueError("synthetic load failure")
+                super().load_config(config)
+
+        manager.datastore_cls = FlakyBackend
+        with self.assertRaisesRegex(ValueError, "synthetic load failure"):
+            manager.get_datastore()
+        self.assertIsNone(manager.datastore)
+        backend = manager.get_datastore()
+        self.assertIsInstance(backend, FlakyBackend)
+        self.assertEqual(backend.get_data("sample"), "value")
+        self.assertIs(manager.get_datastore(), backend)
 
     def test_datastoremanager_default(self):
         """Test the DataStoreManager loading the default DataStore
@@ -116,10 +233,26 @@ class DataStoreManagerTest(unittest.TestCase):
         manager = DataStoreManager(Configuration())
         datastore = manager.get_datastore()
 
-        #self.assertIsInstance(datastore, MemoryDataStore)
+        # Built-in plugins keep their canonical import identity.
+        self.assertIs(datastore.__class__, manager.datastore_cls)
+        self.assertIsInstance(datastore, MemoryDataStore)
+        self.assertIsNot(datastore, DataStoreManager(Configuration()).get_datastore())
 
         new_datastore = manager.get_datastore()
         self.assertIs(datastore, new_datastore)
+
+    def test_datastore_loads_only_its_explicit_namespace(self):
+        manager = DataStoreManager(Configuration({"feed_secret": "private",
+                                                  "datastore": {"shared": "value"}}))
+        datastore = manager.get_datastore()
+        self.assertEqual(datastore.get_data("shared"), "value")
+        with self.assertRaises(DataStoreKeyNotFound):
+            datastore.get_data("feed_secret")
+
+    def test_datastore_namespace_must_be_a_mapping(self):
+        manager = DataStoreManager(Configuration({"datastore": "invalid"}))
+        with self.assertRaisesRegex(ValueError, "datastore must be a mapping"):
+            manager.get_datastore()
 
     def test_datastoremanager_invalid(self):
         """Test the DataStoreManager loading an invalid  DataStore
@@ -135,6 +268,9 @@ def test_suite():
     suite.addTest(loader.loadTestsFromTestCase(MemoryDataStoreTest))
     suite.addTest(loader.loadTestsFromTestCase(DataStoreManagerTest))
     return suite
+
+
+test_suite.__test__ = False
 
 
 if __name__ == "__main__":

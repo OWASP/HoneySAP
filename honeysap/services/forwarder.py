@@ -19,6 +19,8 @@
 import socket
 # External imports
 from gevent.event import Event as gEvent
+from gevent.lock import BoundedSemaphore
+from gevent.pool import Pool
 from gevent.select import select
 from scapy.supersocket import StreamSocket
 # Custom imports
@@ -99,11 +101,18 @@ class ForwarderService(BaseService):
     def mtu(self):
         return self.config.get("mtu", 2048)
 
+    @property
+    def max_connections(self):
+        return int(self.config.get("max_connections", 32))
+
     def setup_server(self):
         super(ForwarderService, self).setup_server()
 
         # Create an event for stopping the handle loop
         self.stopped = gEvent()
+        self.workers = Pool(self.max_connections)
+        self.connection_slots = BoundedSemaphore(self.max_connections)
+        self.connections = set()
 
         # Create and bind the listener socket
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -119,82 +128,112 @@ class ForwarderService(BaseService):
     def run(self):
         # If is not virtual, wait until a client connection arrives
         if not self.virtual:
-
-            try:
-                while not self.stopped.is_set():
-                    # Connects with the client
-                    (client, client_address) = self.listener.ins.accept()
-
-                    # Connects with the target
-                    remote = self.create_remote(client_address,
-                                                self.target_address,
-                                                self.target_port)
-
-                    # Handle the messages until the service is stopped
-                    try:
-                        while not self.stopped.is_set():
-                            self.handle(remote, client, client_address)
-                    # If a socket error was raised, we should continue
-                    # to allow other connections
-                    except socket.error as e:
-                        continue
-
-            # Other exceptions should be raised
-            except Exception as e:
-                raise e
+            while not self.stopped.is_set():
+                try:
+                    client, client_address = self.listener.ins.accept()
+                except socket.error:
+                    if self.stopped.is_set():
+                        break
+                    raise
+                if not self.connection_slots.acquire(blocking=False):
+                    self.logger.warning("Forwarder connection limit reached")
+                    client.close()
+                    continue
+                self.workers.spawn(self._handle_client, client, client_address)
 
     def stop(self):
         # Set the event as stopped
         self.stopped.set()
+        if hasattr(self, "listener"):
+            self.listener.close()
+        for client, remote in list(self.connections):
+            client.close()
+            remote.close()
+        if hasattr(self, "workers"):
+            self.workers.join(timeout=2)
 
-    def create_remote(self, client_address, host, port):
+    def _handle_client(self, client, client_address, release_slot=True):
+        remote = None
+        try:
+            remote, session = self.create_remote(client_address,
+                                                 self.target_address,
+                                                 self.target_port)
+            self.connections.add((client, remote))
+            while not self.stopped.is_set():
+                self.handle(remote, client, client_address, session)
+        except socket.error:
+            pass
+        finally:
+            if remote is not None:
+                self.connections.discard((client, remote))
+                remote.close()
+            client.close()
+            if release_slot:
+                self.connection_slots.release()
+
+    def create_remote(self, client_address, host, port, route_context=None):
         # Creates a session for registering the events
         (client_ip, client_port) = client_address
-        self.session = self.session_manager.get_session("forwarder",
-                                                        client_ip,
-                                                        client_port,
-                                                        self.target_address,
-                                                        self.target_port)
+        route_context = route_context or {}
+        session = self.session_manager.get_session(
+            "forwarder", client_ip, client_port, self.target_address,
+            self.target_port,
+            campaign_uuid=route_context.get("campaign_uuid"),
+            parent_session_uuid=route_context.get("parent_session_uuid"))
 
         self.logger.debug("Connecting client %s:%s to remote %s:%d" % (client_ip,
                                                                        client_port,
                                                                        host, port))
         # Creates a remote socket
         remote = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        remote.connect((host, port))
+        try:
+            remote.connect((host, port))
+        except socket.error:
+            remote.close()
+            raise
 
-        self.session.add_event("Connected to target", data={"target_host": host,
-                                                            "target_port": port})
+        session.add_event("Connected to target", data={"target_host": host,
+                                                        "target_port": port})
         # Wrap it into a StreamSocket so both remote and client are
         # StreamSockets
-        return StreamSocket(remote)
+        return StreamSocket(remote), session
 
-    def handle_virtual(self, client, client_address):
+    def handle_virtual(self, client, client_address, route_context=None):
+
+        if not self.connection_slots.acquire(blocking=False):
+            self.logger.warning("Forwarder connection limit reached")
+            client.close()
+            return
 
         # Connects with the target
-        remote = self.create_remote(client_address,
-                                    self.target_address,
-                                    self.target_port)
-
-        # Handle the messages until the service is stopped
         try:
+            remote, session = self.create_remote(client_address,
+                                                 self.target_address,
+                                                 self.target_port, route_context)
+            self.connections.add((client, remote))
+            # Handle the messages until the service is stopped
             while not self.stopped.is_set():
-                self.handle(remote, client, client_address)
-        except:
+                self.handle(remote, client, client_address, session)
+        except socket.error:
             pass
+        finally:
+            if 'remote' in locals():
+                self.connections.discard((client, remote))
+                remote.close()
+            self.connection_slots.release()
 
-    def handle(self, server, client, client_address):
+    def handle(self, server, client, client_address, session):
         # Simple select bag with client and server sockets
         r, __, __ = select([client, server], [], [], 0.5)
         if client in r:
-            self.recv_send(client, server, request=True)
+            self.recv_send(client, server, session, request=True)
         if server in r:
-            self.recv_send(server, client, request=False)
+            self.recv_send(server, client, session, request=False)
 
-    def recv_send(self, local, remote, request):
+    def recv_send(self, local, remote, session, request):
 
         # Receive data from the local peer
-        data = local.recv(self.mtu)
+        data = bytes(local.recv(self.mtu))
 
         # If we received zero bytes, the connection got down, raise the
         # exception so we can exit the loop and accept other clients
@@ -207,14 +246,13 @@ class ForwarderService(BaseService):
                             "target_port": self.target_port})
 
         # Add the entire packet to the event
-        data = str(data)
         if request:
             event.request = data
         else:
             event.response = data
 
         # Register the event
-        self.session.add_event(event)
+        session.add_event(event)
 
         # Send it to the remote peer
-        remote.send(data)
+        getattr(remote, "outs", remote).sendall(data)

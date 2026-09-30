@@ -27,13 +27,14 @@ from honeysap.core.logger import default_formatter, colored_formatter
 class ConsoleFeed(BaseFeed):
     """Console based feed class"""
 
+    supports_consumption = False
     EVENT = 9
 
     def setup(self):
         """Initializes the console stream"""
         logging.addLevelName(self.EVENT, "EVENT")
 
-        if self.config.colored_console and colored_formatter:
+        if self.config.get("colored_console", False) and colored_formatter:
             formatter = colored_formatter
         else:
             formatter = default_formatter
@@ -57,5 +58,5 @@ class ConsoleFeed(BaseFeed):
         """Logs an event in the log file"""
         self.feed_logger.log(self.EVENT, repr(event))
 
-    def consume(self):
-        raise Exception("Console feed can't be consumed")
+    def consume(self, queue):
+        raise NotImplementedError("Console feed cannot be consumed")

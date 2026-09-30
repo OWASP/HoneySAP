@@ -31,29 +31,32 @@ You can include another file from a configuration file.
 
 ``JSON``:
 
-You can use ``__include__`` as a special key for specify that you want to
-include a file. The file name would be taken from the value of that key and
-replaces by the content of the included  ``json`` file:
+Use ``!include`` as a special key whose string value is the path to a JSON
+file. The included content replaces the object containing that key:
 
 .. code-block:: json
 
     {
        "Some key":"Some value",
        "Some nested key":{
-          "__include__":"path_to_the_file_to_include.json"
+          "!include":"config/other.json"
        }
     }
 
 ``YAML``:
 
-You can use ``!include`` as a special keyword for specify the file you want
-to include. The content of the included ``yaml`` file will replace the value
-of the key:
+Use ``!include`` as a tag whose path points to a YAML file. Its content
+replaces the tagged value:
 
 .. code-block:: yaml
 
-   - Some key: Some value,
-     Some nested key: !include path_to_the_file_to_include.yml
+   Some key: Some value
+   Some nested key: !include config/other.yml
+
+Relative include paths are resolved against the file containing the include,
+not the current working directory. Includes can be nested; cyclic includes
+are rejected. Includes must remain within the directory containing the root
+configuration file.
 
 Comments
 ''''''''
@@ -125,17 +128,86 @@ Miscellaneous configuration options:
    # Miscellaneous configuration
    # ---------------------------
    
-   # Enable reloading after a change in one of the configuration files
-   reload: false
-   
    # Data store class
    datastore_class: MemoryDataStore
-   
-   # Trace raw requests in feeds
-   trace_raw_requests: True
+
+   # Bounded event delivery and session lifecycle
+   event_queue_maxsize: 10000
+   feed_queue_maxsize: 1000
+   feed_failure_threshold: 5
+   feed_retry_seconds: 60
+   max_sessions: 10000
+   max_campaigns: 10000
+   session_ttl_seconds: 3600
+   campaign_window_seconds: 3600
    
    # Address to listen for all services
    listener_address: 127.0.0.1
+
+``event_queue_maxsize`` bounds events waiting for feeds (default ``10000``).
+When the queue is full, HoneySAP drops the newest event rather than blocking a
+network listener; the session and feed-manager metrics expose accepted,
+dropped, queued, processed, and feed-error counters. ``session_ttl_seconds``
+expires inactive connection sessions (default ``3600``). Sessions opened from
+the same source address within ``campaign_window_seconds`` (default ``3600``)
+share a campaign identifier; set the window to ``0`` to disable campaign
+grouping. Serialized events include a schema version, event ID, per-session
+sequence number, UTC timestamp, session ID, and campaign ID.
+
+.. _event-correlation:
+
+Interpreting event correlation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Every serialized event has a ``session`` and ``campaign`` field. ``session``
+identifies one service connection and is the precise key for ordering its
+events by ``sequence``. ``campaign`` is a broader investigation aid: sessions
+from the same source address within ``campaign_window_seconds`` share it. It
+can group related scanning across services, but it is not an attacker identity
+because multiple actors can share an address (for example behind NAT).
+
+Forwarder events created after a SAPRouter handoff also include
+``parent_session``. Its value is the ``session`` ID of the SAPRouter connection
+that accepted the route, providing an exact join from forwarded traffic back
+to the route request. Directly exposed Forwarder events have an empty
+``parent_session`` because there is no upstream SAPRouter connection.
+
+For example, analysts can group a scan with ``campaign``, inspect each
+connection using ``session`` and ``sequence``, and join a routed Forwarder
+payload to its SAPRouter request by matching ``parent_session`` to the router
+event's ``session``.
+
+.. _event-contents:
+
+Reading event contents
+~~~~~~~~~~~~~~~~~~~~~~
+
+Use ``service`` and ``event`` to identify the protocol observation, then read
+``data`` for decoded fields specific to that event. ``request`` and
+``response`` retain the captured wire evidence as base64 text; decode them
+only when the event fields do not answer the investigation question. The
+``schema_version`` identifies the event format, while ``event_id`` identifies
+one emitted record.
+
+Service documentation lists its named events and detection-specific fields.
+Treat them as observations of an attempted action, not proof that a target
+operation succeeded.
+``feed_queue_maxsize`` independently bounds each feed's delivery queue
+(default ``1000``), so a slow feed cannot delay another feed. Values whose
+configuration key names contain password, secret, token, credential, key, or
+certificate markers are redacted from startup logs; attacker-supplied event
+data is not redacted by this configuration safeguard. Binary event-data values
+are retained as explicit ``{"type": "bytes", "encoding": "base64",
+"value": "..."}`` objects rather than being decoded as text.
+``max_sessions`` and ``max_campaigns`` bound retained connection and campaign
+state (both default to ``10000``); the least recently active entry is evicted
+when either limit is reached. The DataStore receives only values explicitly
+listed under the top-level ``datastore:`` mapping, rather than the complete
+configuration.
+After ``feed_failure_threshold`` consecutive delivery failures (default ``5``),
+a feed is paused for ``feed_retry_seconds`` (default ``60``) before delivery is
+retried. Feed and service configurations receive only their own settings and
+safe shared defaults; sibling credentials are not propagated.
 
 
 SAP instance configuration
@@ -153,4 +225,13 @@ The following are configuration options related to the SAP instance:
    
    # Hostname
    hostname: sapnw702
-        
+
+
+Versioned behavior profiles
+---------------------------
+
+A service may expose a nested behavior or error profile when observable
+responses vary between product builds. Such profiles are ordinary service
+configuration, not a permanent registry of supported versions. The example
+files under ``profiles/`` can therefore change as emulation targets are added,
+updated, or retired.

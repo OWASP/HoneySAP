@@ -26,3 +26,6 @@ Full configuration is provided using a configuration file (``-c`` or
 ``--config-file`` options). Detailed documentation about the configuration
 options is provided in section :doc:`../user/configuration` and
 :doc:`../user/services/index`.
+
+For interpreting event output, see :ref:`event-correlation` and
+:ref:`event-contents` in the configuration guide.

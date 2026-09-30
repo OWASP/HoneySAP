@@ -38,7 +38,7 @@ class MemoryDataStore(BaseDataStore):
         """Gets the data from the internal data store.
         """
         if key not in self._datastore:
-            raise DataStoreKeyNotFound
+            raise DataStoreKeyNotFound(key)
         return self._datastore[key]
 
     def put_data(self, key, value):

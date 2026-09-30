@@ -17,17 +17,15 @@
 
 # Standard imports
 import sys
-import logging
 from optparse import OptionGroup
-# External imports
-from gevent.monkey import patch_all; patch_all()  # @IgnorePep8
 # Custom imports
 from .feed import FeedManager
 from .session import SessionManager
 from .service import ServiceManager
 from .datastore import DataStoreManager
 from .config import ConfigurationParserFromFile
-from .logger import (Loggeable, default_formatter, colored_formatter)
+from .logger import (Loggeable, configure_stream_logger, default_formatter,
+                     colored_formatter)
 
 
 class HoneySAP(Loggeable):
@@ -82,22 +80,16 @@ class HoneySAP(Loggeable):
         else:
             formatter = default_formatter
 
-        logger = logging.getLogger(namespace)
-        logger.level = level
-        stream_handler = logging.StreamHandler(sys.stdout)
-        stream_handler.setFormatter(formatter)
-        stream_handler.setLevel(level)
-        logger.addHandler(stream_handler)
+        configure_stream_logger(namespace, level, formatter, sys.stdout)
 
         self.logger.debug("Logging configured")
-        self.logger.info("Using config: %s", self.config)
+        self.logger.info("Using config: %s", self.config.redacted())
 
     def setup_datastore(self):
         """Setup the data store manager"""
         self.logger.info("Setting up data store")
         self.datastore_manager = DataStoreManager(self.config)
         self.datastore = self.datastore_manager.get_datastore()
-        self.datastore.load_config(self.config)
 
     def setup_sessions(self):
         """Setup attack session manager"""
@@ -120,14 +112,22 @@ class HoneySAP(Loggeable):
         """Launch the configured and enabled services"""
 
         self.logger.info("Starting feed manager")
-        self.feed_manager.run()
-        self.logger.info("Starting services")
         try:
+            self.feed_manager.run()
+            self.logger.info("Starting services")
             self.service_manager.run()
         except KeyboardInterrupt:
+            pass
+        finally:
             self.stop()
 
     def stop(self):
         """Stop all running services and feeds"""
-        self.feed_manager.stop()
-        self.service_manager.stop()
+        try:
+            self.feed_manager.stop()
+        finally:
+            try:
+                self.service_manager.stop()
+            finally:
+                if hasattr(self, "datastore_manager"):
+                    self.datastore_manager.stop()

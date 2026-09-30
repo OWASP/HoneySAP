@@ -16,6 +16,7 @@
 #
 
 # Standard imports
+import os
 import logging
 # External imports
 # Custom imports
@@ -26,6 +27,7 @@ from honeysap.core.logger import default_formatter
 class LogFeed(BaseFeed):
     """Log file based feed class"""
 
+    supports_consumption = False
     EVENT = 9
 
     @property
@@ -35,6 +37,10 @@ class LogFeed(BaseFeed):
     def setup(self):
         """Initializes the log file"""
         logging.addLevelName(self.EVENT, "EVENT")
+
+        log_dir = os.path.dirname(self.log_filename)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
 
         self.logfile_handler = logging.FileHandler(self.log_filename)
         self.logfile_handler.setFormatter(default_formatter)
@@ -50,11 +56,12 @@ class LogFeed(BaseFeed):
         """Removes the log file handler"""
         self.feed_logger.info("Stopping log feed")
         self.feed_logger.removeHandler(self.logfile_handler)
+        self.logfile_handler.close()
         self.logger.debug("Closed log filename handler")
 
     def log(self, event):
         """Logs an event in the log file"""
         self.feed_logger.log(self.EVENT, repr(event))
 
-    def consume(self):
-        raise Exception("Log feed can't be consumed")
+    def consume(self, queue):
+        raise NotImplementedError("Log feed cannot be consumed")

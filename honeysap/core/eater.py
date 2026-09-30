@@ -17,15 +17,13 @@
 
 # Standard imports
 import sys
-import logging
 from optparse import OptionGroup
-# External imports
-from gevent.monkey import patch_all; patch_all()  # @IgnorePep8
 # Custom imports
 from .feed import FeedManager
 from .session import SessionManager
 from .config import ConfigurationParserFromFile
-from .logger import (Loggeable, default_formatter, colored_formatter)
+from .logger import (Loggeable, configure_stream_logger, default_formatter,
+                     colored_formatter)
 
 
 class HoneySAPEater(Loggeable):
@@ -78,15 +76,10 @@ class HoneySAPEater(Loggeable):
         else:
             formatter = default_formatter
 
-        logger = logging.getLogger(namespace)
-        logger.level = level
-        stream_handler = logging.StreamHandler(sys.stdout)
-        stream_handler.setFormatter(formatter)
-        stream_handler.setLevel(level)
-        logger.addHandler(stream_handler)
+        configure_stream_logger(namespace, level, formatter, sys.stdout)
 
         self.logger.debug("Logging configured")
-        self.logger.info("Using config: %s", self.config)
+        self.logger.info("Using config: %s", self.config.redacted())
 
     def setup_feeds(self):
         """Setup attack session feeds configured."""
@@ -99,13 +92,20 @@ class HoneySAPEater(Loggeable):
         self.logger.info("Setting the output")
 
         self.outputs = []
-        for eater_type in self.config.get("eater_output", ["stdout"]):
-            if eater_type == "stdout":
-                self.outputs.append(sys.stdout)
-            elif eater_type == "file":
-                filename = self.config.get("eater_filename", "honeysapeater.log")
-                with open(filename, "a") as fd:
-                    self.outputs.append(fd)
+        self._owned_outputs = []
+        try:
+            for eater_type in self.config.get("eater_output", ["stdout"]):
+                if eater_type == "stdout":
+                    self.outputs.append(sys.stdout)
+                elif eater_type == "file":
+                    filename = self.config.get("eater_filename", "honeysapeater.log")
+                    output = open(filename, "a", encoding="utf-8")
+                    self.outputs.append(output)
+                    self._owned_outputs.append(output)
+        except Exception:
+            for output in self._owned_outputs:
+                output.close()
+            raise
 
     def run(self):
         """Launch the configured and enabled services"""
@@ -114,13 +114,17 @@ class HoneySAPEater(Loggeable):
         try:
             self.feed_manager.consume_events(self.output)
         except KeyboardInterrupt:
+            pass
+        finally:
             self.stop()
 
     def stop(self):
         """Stop all running services and feeds"""
-        self.feed_manager.stop()
-        for output in self.outputs:
-            output.close()
+        try:
+            self.feed_manager.stop()
+        finally:
+            for output in getattr(self, "_owned_outputs", []):
+                output.close()
 
     def output(self, event):
         """Output an event according to the outputs defined for the eater. Each

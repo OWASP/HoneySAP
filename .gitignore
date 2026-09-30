@@ -7,6 +7,7 @@ __pycache__/
 
 # Distribution / packaging
 .Python
+.venv/
 env/
 build/
 develop-eggs/
@@ -51,6 +52,7 @@ coverage.xml
 
 # Sphinx documentation
 docs/_build/
+docs/api/honeysap.*rst
 
 # PyBuilder
 target/
@@ -63,3 +65,9 @@ target/
 .project
 .pydevproject
 .settings
+.claude
+.DS_Store
+
+# Other files
+*.trc
+logs

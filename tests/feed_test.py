@@ -17,19 +17,23 @@
 
 # Standard imports
 import unittest
+from unittest.mock import patch
 # External imports
-from gevent.hub import sleep
+from gevent import spawn
 from gevent.queue import Queue
 # Custom imports
 from honeysap.core.event import Event
 from honeysap.core.config import Configuration
 from honeysap.core.session import SessionManager
 from honeysap.core.feed import BaseFeed, FeedManager
+from honeysap.core.loader import ClassLoader
+from honeysap.feeds.dbfeed import DBFeed
 
 
 class DummyFeed(BaseFeed):
 
-    events = Queue()
+    def setup(self):
+        self.events = Queue()
 
     def log(self, event):
         self.events.put(event)
@@ -40,6 +44,79 @@ class DummyFeed(BaseFeed):
 
 class FeedManagerTest(unittest.TestCase):
 
+    def test_metrics_use_unique_feed_ids_and_expose_queue_depth(self):
+        manager = FeedManager(Configuration(), SessionManager(Configuration()))
+        manager.add_feed(DummyFeed(Configuration()))
+        manager.add_feed(DummyFeed(Configuration()))
+        manager._start_feed_workers()
+        try:
+            metrics = manager.metrics()["feeds"]
+            self.assertEqual(set(metrics), {"DummyFeed-1", "DummyFeed-2"})
+            self.assertTrue(all("queued" in metric for metric in metrics.values()))
+        finally:
+            manager.stop()
+
+    def test_duplicate_configured_feed_ids_are_rejected(self):
+        manager = FeedManager(Configuration(), SessionManager(Configuration()))
+        manager.add_feed(DummyFeed(Configuration({"feed_id": "same"})))
+        manager.add_feed(DummyFeed(Configuration({"feed_id": "same"})))
+        with self.assertRaisesRegex(ValueError, "Duplicate feed_id"):
+            manager._start_feed_workers()
+
+    def test_failed_feed_setup_closes_previously_loaded_feeds(self):
+        class TrackingFeed(DummyFeed):
+            def setup(self):
+                super().setup()
+                self.stop_count = 0
+
+            def stop(self):
+                self.stop_count += 1
+
+        class FailingSetupFeed(DummyFeed):
+            def setup(self):
+                raise ValueError("synthetic setup failure")
+
+        config = Configuration({"feeds": [{"feed": "TrackingFeed", "enabled": True},
+                                        {"feed": "FailingSetupFeed", "enabled": True}]})
+        manager = FeedManager(config, SessionManager(config))
+        with patch("honeysap.core.feed.ClassLoader") as loader:
+            loader.return_value.load.return_value = [
+                ("TrackingFeed", TrackingFeed),
+                ("FailingSetupFeed", FailingSetupFeed)]
+            with self.assertRaisesRegex(ValueError, "synthetic setup failure"):
+                manager.load_feeds()
+        self.assertEqual(len(manager.feeds), 1)
+        self.assertEqual(manager.feeds[0].stop_count, 1)
+        self.assertTrue(manager.stopped.is_set())
+
+    def test_load_feeds_selects_only_enabled_configurations(self):
+        config = Configuration({"feeds": [{"feed": "DummyFeed", "enabled": False},
+                                        {"feed": "DummyFeed", "enabled": True},
+                                        {"feed": "OtherFeed", "enabled": True}]})
+        manager = FeedManager(config, SessionManager(config))
+        with patch("honeysap.core.feed.ClassLoader") as loader:
+            loader.return_value.load.return_value = [("DummyFeed", DummyFeed)]
+            manager.load_feeds()
+        self.assertEqual(len(manager.feeds), 1)
+        self.assertIsInstance(manager.feeds[0], DummyFeed)
+        self.assertTrue(manager.feeds[0].config.get("enabled"))
+        manager.stop()
+
+    def test_builtin_feed_loader_preserves_class_identity(self):
+        loader = ClassLoader([BaseFeed], "honeysap/feeds")
+        self.assertIs(loader.find("DBFeed"), DBFeed)
+
+    def test_real_feed_configuration_loads_canonical_backend(self):
+        config = Configuration({"feeds": [{"feed": "DBFeed", "enabled": True,
+                                            "db_engine": "sqlite:///:memory:"}]})
+        manager = FeedManager(config, SessionManager(config))
+        manager.load_feeds()
+        try:
+            self.assertEqual(len(manager.feeds), 1)
+            self.assertIsInstance(manager.feeds[0], DBFeed)
+        finally:
+            manager.stop()
+
     def test_feed_manager(self):
         """Test attack feed manager"""
 
@@ -47,8 +124,17 @@ class FeedManagerTest(unittest.TestCase):
         config = Configuration()
         session_manager = SessionManager(config)
         feed_manager = FeedManager(config, session_manager)
-        feed_manager.add_feed(DummyFeed(config))
-        feed_manager.run()
+        feed = DummyFeed(config)
+        feed_manager.add_feed(feed)
+        workers = []
+
+        def tracked_spawn(callback, *args):
+            worker = spawn(callback, *args)
+            workers.append(worker)
+            return worker
+
+        with patch("honeysap.core.feed.spawn", tracked_spawn):
+            feed_manager.run()
 
         # Create an event
         event = Event("Test event")
@@ -57,13 +143,16 @@ class FeedManagerTest(unittest.TestCase):
         session = session_manager.get_session("test", "127.0.0.1", 3200, "127.0.0.1", 3201)
         session.add_event(event)
 
-        # Give the feed manager time for processing the event
-        sleep(1)
-
-        # Stop the feed manager and check if the event was processed
-        feed_manager.stop()
-        new_event = DummyFeed.events.get()
-        self.assertIs(event, new_event)
+        try:
+            # A bounded receipt is deterministic and fails instead of hanging.
+            self.assertIs(event, feed.events.get(timeout=2))
+            self.assertEqual(feed_manager.metrics()["processed"], 1)
+            self.assertEqual(feed_manager.metrics()["dropped"], 0)
+        finally:
+            feed_manager.stop()
+            for worker in workers:
+                worker.join(timeout=2)
+        self.assertTrue(all(worker.dead for worker in workers))
 
 
 def test_suite():
@@ -71,6 +160,9 @@ def test_suite():
     suite = unittest.TestSuite()
     suite.addTest(loader.loadTestsFromTestCase(FeedManagerTest))
     return suite
+
+
+test_suite.__test__ = False
 
 
 if __name__ == "__main__":
