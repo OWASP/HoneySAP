@@ -713,8 +713,8 @@ _UC2_INTTYPES = frozenset({'C', 'N', 'D', 'T', 'G', 'g'})
 # Maximum number of flat DFIES rows to include in a single DDIF_FIELDINFO_GET
 # response.  The NWRFC SDK cannot process responses with many DFIES rows
 # (observed failure at 32 rows / ~44 KB body).  When more fields are present
-# in the catalog the gateway falls back to a single synthetic RAW field so the
-# SDK gets a valid (if opaque) type descriptor.
+# in the catalog the gateway falls back to synthetic CHAR fields covering the
+# same total length so the SDK gets a valid (if opaque) type descriptor.
 _MAX_DDIF_ROWS = 14
 
 
@@ -751,8 +751,8 @@ def _nuc_intlength(exid, intlength, tabname, ddic_catalog):
 
     For structure/table types ('u'/'h') the non-unicode total is computed
     field-by-field from the DDIC catalog when available; otherwise the
-    catalog intlength is halved (NUC = UC/2) since synthetic RAW DFIES
-    fields encode the NUC byte count directly.  PARAMS.INTLENGTH must
+    catalog intlength is halved (NUC = UC/2) to match the synthetic CHAR
+    DFIES fields built by _synthetic_ddic_fields.  PARAMS.INTLENGTH must
     match the NUC sum the SDK accumulates from DFIES rows.
     """
     if exid in _UC2_EXIDS:
@@ -1317,9 +1317,8 @@ class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
                           data.get("lu"), data.get("tp"), data.get("service"))
         self.session.add_event("Normal client connection", data=data)
 
-        # Build response: echo the raw request but flip accept_info to add
-        # CODE_PAGE (bit 4) and NIPING (bit 5).  In version 2 the
-        # accept_info byte is at offset 41; in version 3 it is also at 41.
+        # Build response: echo the raw request but set the CODE_PAGE bit
+        # (0x10) in the accept_info byte at offset 55.
         #
         # Also override the codepage field (offset 20, 4 ASCII bytes) to
         # "4103" (Unicode).  The client sends "1100" (non-Unicode) by default;
@@ -2226,11 +2225,9 @@ class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
 
         Protocol (from pcap a4h-a4h_rfc_connection_test.pcapng frames 16-20):
           1. TCP connect to client_ip:3300
-          2. Send   NI_PING\x00  (NI frame: 4-byte len=8 + 8-byte payload)
-          3. Receive NI_PING\x00 echo from server
-          4. Send   NI_PONG\x00  (NI frame: 4-byte len=8 + 8-byte payload)
-          5. Receive NI_PONG\x00 echo from server
-          6. Close TCP connection
+          2. Send    NI_PING\x00  (NI frame: 4-byte len=8 + 8-byte payload)
+          3. Receive NI_PONG\x00  reply (12 bytes, 5 s timeout)
+          4. Close TCP connection
         """
         import socket as _socket
         import struct
@@ -2748,8 +2745,8 @@ class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
         Lookup order:
         1. ddic_catalog  — exported from SAP (most accurate)
         2. _BUILTIN_DDIC — hand-crafted entries for common types
-        3. tabname_intlength index  — synthesise a single RAW field of the
-           right total byte length.  Sufficient for empty / output-only
+        3. tabname_intlength index  — synthesise CHAR fields (DATA1, DATA2,
+           ...) of the right total byte length.  Sufficient for empty / output-only
            parameters where the SDK only needs a valid descriptor, not
            individual field names.
         """
@@ -2809,17 +2806,13 @@ class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
             )
             fields = self._get_ddic_fields(tabname) if tabname else None
             if fields:
-                # Detect partner codepage so we can send DFIES INTLEN values
-                # in the encoding the NWRFC SDK expects.
+                # Send DFIES INTLEN values in the encoding the NWRFC SDK
+                # expects for the partner codepage:
                 # NUC mode (Communication Codepage 1100): SDK reads INTLEN
                 # directly as NUC bytes (no halving).  Send NUC values so
                 # the SDK's NUC sum matches X030L_WA.TABLEN / PARAMS.INTLENGTH.
                 # UC mode (Communication Codepage 4103): SDK halves CHAR
                 # INTLEN internally.  Send UC values (unchanged from catalog).
-                # Always send UC (catalog) INTLEN values.  UCLEN=1 tells the
-                # NUC mode (Comm.CP=1100): send NUC intlen values so SDK reads
-                # them directly as NUC bytes.  UCLEN=0 means no Unicode-server
-                # uc>=2*nuc structure check, so RAW fields (uc==nuc) pass.
                 nuc_mode = (getattr(self, "_partner_codepage", "4103") == "1100")
                 # Filter out complex/reference types that the NWRFC SDK cannot
                 # parse in flat DFIES rows: 'g' (STRG string-ref, intlen=8) and
@@ -3026,7 +3019,7 @@ class SAPGatewayService(BaseTCPService):
             self.server.ddic_catalog = {}
 
         # Build tabname → INTLENGTH index from RFM catalog.
-        # Used to synthesise single-RAW-field DFIES descriptors for structure
+        # Used to synthesise CHAR-field DFIES descriptors for structure
         # types not present in the catalog or _BUILTIN_DDIC.
         tabname_intlength = {}
         for fm_info in self.server.rfm_catalog.values():
