@@ -1,9 +1,10 @@
 HoneySAP: SAP Low-interaction honeypot
 ======================================
 
-[![Build and test HoneySAP](https://github.com/OWASP/HoneySAP/actions/workflows/build_and_test.yml/badge.svg?branch=master-0.2-dev)](https://github.com/OWASP/HoneySAP/actions/workflows/build_and_test.yml?query=branch%3Amaster-0.2-dev)
-[![Documentation Status](https://img.shields.io/readthedocs/HoneySAP/master-0.2-dev?logo=readthedocs)](https://honeysap.readthedocs.io/en/master-0.2-dev/)
+[![Build and test HoneySAP](https://github.com/OWASP/HoneySAP/actions/workflows/build_and_test.yml/badge.svg)](https://github.com/OWASP/HoneySAP/actions/workflows/build_and_test.yml)
+[![Read the Docs](https://img.shields.io/readthedocs/HoneySAP?logo=readthedocs)](https://honeysap.readthedocs.io/)
 [![Discord](https://img.shields.io/discord/710814201358319676?logo=discord&label=Discord)](https://discord.com/channels/710814201358319676/1155823765561815051)
+
 
 Version 0.2.0.dev0 (unreleased)
 
