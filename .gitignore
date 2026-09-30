@@ -70,3 +70,4 @@ target/
 
 # Other files
 *.trc
+logs
