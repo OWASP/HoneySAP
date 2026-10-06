@@ -25,11 +25,11 @@ COPY . /opt/honeysap
 WORKDIR /opt/honeysap
 
 # Install pysap: use a local wheel/tarball if one was bundled with the
-# source tree (offline / air-gapped builds), otherwise pull from GitHub.
+# source tree (offline / air-gapped builds), otherwise pull from PyPI.
 RUN if find pysap/dist -name "pysap-*.tar.gz" 2>/dev/null | grep -q .; then \
         python3 -m pip install "$(find pysap/dist -name 'pysap-*.tar.gz' | sort | tail -1)"; \
     else \
-        python3 -m pip install "git+https://github.com/OWASP/pysap.git"; \
+        python3 -m pip install "pysap==0.2.1"; \
     fi
 
 # Install HoneySAP
