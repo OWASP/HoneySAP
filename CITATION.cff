@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use HoneySAP, please cite it as below."
+type: software
+title: "HoneySAP: SAP low-interaction honeypot"
+authors:
+  - family-names: Gallo
+    given-names: Martin
+  - name: "OWASP Core Business Application Security Project"
+version: 0.2.0
+date-released: 2026-10-06
+url: "https://github.com/OWASP/HoneySAP"
+license: "GPL-2.0-or-later"
