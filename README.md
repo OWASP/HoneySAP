@@ -1,13 +1,12 @@
 HoneySAP: SAP Low-interaction honeypot
 ======================================
 
-[![Build and test HoneySAP](https://github.com/OWASP/HoneySAP/actions/workflows/build_and_test.yml/badge.svg)](https://github.com/OWASP/HoneySAP/actions/workflows/build_and_test.yml)
+[![CI](https://github.com/OWASP/HoneySAP/actions/workflows/ci.yml/badge.svg)](https://github.com/OWASP/HoneySAP/actions/workflows/ci.yml)
+[![PyPI Version](https://img.shields.io/pypi/v/honeysap?logo=pypi)](https://pypi.org/project/honeysap/)
 [![Read the Docs](https://img.shields.io/readthedocs/HoneySAP?logo=readthedocs)](https://honeysap.readthedocs.io/)
 [![Discord](https://img.shields.io/discord/710814201358319676?logo=discord&label=Discord)](https://discord.com/channels/710814201358319676/1155823765561815051)
 
-
 Version 0.2.1.dev0 (unreleased)
-
 
 Overview
 --------
@@ -38,7 +37,7 @@ Installation
 
 To install HoneySAP, simply download the sources and run:
 
-    $ python -m pip install .
+    $ python3 -m pip install honeysap
 
 A more complete guidance on how to install HoneySAP on different environments
 is provided in the documentation.

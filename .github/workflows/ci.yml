@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - "ChangeLog.md"
+  pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - "ChangeLog.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.2"
+          enable-cache: true
+          cache-dependency-glob: requirements-lint.txt
+      - run: uv pip install --system flake8
+      - run: flake8 . --count --select=E901,E999,F821,F822,F823 --show-source --statistics
+      - run: flake8 . --count --ignore=E501 --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+  unit:
+    name: Unit tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.10"
+            experimental: true
+          - python-version: "3.11"
+            experimental: false
+          - python-version: "3.12"
+            experimental: false
+          - python-version: "3.13"
+            experimental: false
+          - python-version: "3.14"
+            experimental: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.2"
+          enable-cache: true
+          cache-suffix: ${{ github.workflow }}-${{ matrix.python-version }}
+          cache-dependency-glob: |
+            requirements.txt
+            requirements-test.txt
+      - run: uv pip install --system wheel setuptools
+      - run: uv pip install --system -r requirements.txt -r requirements-test.txt
+      - run: uv pip install --system -e .
+      - run: python -m pytest tests/ -v
