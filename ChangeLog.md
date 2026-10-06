@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.2.0.dev0 - in dev
+## v0.2.0 - 2026-10-06
 
 ### New features
 

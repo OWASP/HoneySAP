@@ -30,7 +30,7 @@ against SAP systems.
 __title__ = 'honeysap'
 """The title of the library"""
 
-__version__ = '0.2.0.dev0'
+__version__ = '0.2.0'
 """The version of honeysap"""
 
 __url__ = "https://owasp.org/www-project-core-business-application-security/"

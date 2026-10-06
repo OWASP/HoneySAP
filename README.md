@@ -6,7 +6,7 @@ HoneySAP: SAP Low-interaction honeypot
 [![Discord](https://img.shields.io/discord/710814201358319676?logo=discord&label=Discord)](https://discord.com/channels/710814201358319676/1155823765561815051)
 
 
-Version 0.2.0.dev0 (unreleased)
+Version 0.2.0
 
 
 Overview

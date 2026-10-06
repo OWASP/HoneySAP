@@ -14,6 +14,7 @@
 #
 import os
 import sys
+from pathlib import Path
 docs_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(docs_dir, '..')))
 
@@ -167,6 +168,12 @@ texinfo_documents = [
 
 # Automatically build API docs
 def run_apidoc(_):
+    # Remove stale generated pages before rebuilding the API documentation.
+    # Otherwise pages for modules deleted or renamed in the source tree remain
+    # discoverable by Sphinx and produce import/orphan warnings.
+    for generated_page in Path(docs_dir, "api").glob("honeysap*.rst"):
+        generated_page.unlink()
+
     ignore_paths = []
     argv = [
         "-f",           # Force
