@@ -29,6 +29,8 @@ class SystemPersona(object):
     defaults = {
         "sid": "PRD",
         "hostname": "sapnw702",
+        # DNS domain, used for the TLS certificate name (<SID>.<domain>)
+        "domain": None,
         "instance_number": "00",
         "client": "001",
         "language": "EN",
@@ -87,6 +89,14 @@ class SystemPersona(object):
         return cls(**values)
 
     @property
+    def certificate_name(self):
+        """Common name of the system certificate: <SID>.<domain> like an
+        installation certificate, or the hostname without a domain."""
+        if self.domain:
+            return "%s.%s" % (self.sid, self.domain)
+        return self.hostname
+
+    @property
     def instance_name(self):
         """Application server instance name, e.g. sapnw702_PRD_00."""
         return "%s_%s_%s" % (self.hostname, self.sid, self.instance_number)
@@ -134,4 +144,3 @@ class SystemPersona(object):
                 '<SOAP-ENV:Body><rfc:RFC_SYSTEM_INFO.Response '
                 'xmlns:rfc="urn:sap-com:document:sap:rfc:functions"><RFCSI>%s</RFCSI>'
                 '</rfc:RFC_SYSTEM_INFO.Response></SOAP-ENV:Body></SOAP-ENV:Envelope>' % fields)
-

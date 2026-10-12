@@ -43,6 +43,12 @@ class LoggingPolicy(object):
         "http_headers": True,
         # HTTP services: log the request body (also part of the raw request)
         "http_body": True,
+        # HTTP services: log requests for static resources (e.g. the UI5
+        # files of the Fiori launchpad)
+        "static_assets": False,
+        # HTTP services: decode query, form and JSON parameters and report
+        # submitted credentials
+        "http_params": True,
     }
 
     def __init__(self, **options):
@@ -53,7 +59,7 @@ class LoggingPolicy(object):
                              ", ".join(sorted(unknown)))
         values.update(options)
         for name in ("raw_payloads", "response_events", "unparsed_input",
-                     "http_headers", "http_body"):
+                     "http_headers", "http_body", "static_assets", "http_params"):
             if not isinstance(values[name], bool):
                 raise ValueError("logging.%s must be a boolean" % name)
         limit = values["max_payload_bytes"]

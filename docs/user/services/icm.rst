@@ -58,6 +58,65 @@ HEAD requests get the headers only. ``ICM HTTP request`` events include
 when an ``Authorization: Basic`` header was sent.
 
 
+**SAP Fiori launchpad**
+
+With ``fiori_launchpad`` enabled, the ICM serves an SAP Fiori launchpad of an
+ABAP Platform system (launchpad 1.136, SAPUI5 1.136): the logon page, the
+shell with its catalogs, App Finder, user menu, settings and search, and the
+apps of the recorded system. Two sample apps (Shop, Manage Products) and two
+system apps work with data down to the object pages; most other apps open and
+fail on their OData services, as on a system where these services are not
+activated. The responses come from a bundle recorded on a real system and
+are filled with the :ref:`system persona <system-persona>` (SID, client,
+host, instance) and the logged on user, whose name the shell shows.
+
+- Logons on the logon page and with Basic authentication are checked against
+  ``credentials`` (``auth_mode: list``), accept every user
+  (``accept_any``) or reject all (``reject_all``). Each attempt is logged as
+  ``FLP logon attempt`` with ``user``, ``password``, ``client`` and
+  ``success``. A successful logon gets ``MYSAPSSO2`` and
+  ``SAP_SESSIONID_<SID>_<client>`` cookies and a session; like an ICM the
+  ticket's cookie domain is the request host without its first label.
+- OData requests get CSRF tokens like SAP Gateway: a token is issued for
+  ``x-csrf-token: Fetch`` (and only sent back to such requests) and
+  checked on every request that sends one;
+  modifying requests without a valid token are answered ``403 CSRF token
+  validation failed``.
+- Modifying requests (``POST``, ``PUT``, ``MERGE``, ``DELETE``, ``$batch``
+  changesets) are logged as ``FLP data modification attempt`` and refused
+  with an authorization error; reading ``$batch`` parts are answered.
+- Like an ICM, the launchpad and its services require HTTPS
+  (``403 Forbidden - SSL required`` on HTTP), unless ``require_https`` is
+  disabled.
+- Requests of logged on users carry ``flp_user`` and ``flp_client`` in the
+  ``ICM HTTP request`` events, so their actions after a logon can be
+  followed.
+- Requests for static resources (UI5 libraries, themes, images) are not
+  logged unless the ``static_assets`` :ref:`logging option
+  <evidence-logging>` is enabled; one launchpad visit loads several hundred.
+
+Configuration::
+
+   fiori_launchpad:
+     enabled: yes
+     # Recorded launchpad shipped with HoneySAP
+     bundle: data/icm/flp/flp_bundle.tar.xz
+     require_https: yes
+     # list (default), accept_any or reject_all
+     auth_mode: list
+     # Accepted users; without this list well-known SAP default
+     # credentials are accepted (SAP*, DDIC, EARLYWATCH, TMSADM, SAPCPIC,
+     # DEVELOPER, ...). client is optional; first_name/last_name are shown
+     # in the shell.
+     credentials:
+       - {user: DEVELOPER, password: "Welcome1", client: "100",
+          first_name: John, last_name: Smith}
+     # Name shown for users without first_name/last_name
+     default_profile: {first_name: "", last_name: ""}
+
+Enable it on the HTTPS ICM service (``tls: {enabled: yes}``). Loading the
+bundle takes a few seconds at startup and about 60 MB of memory.
+
 Configuration options
 ---------------------
 
@@ -105,7 +164,8 @@ HTTPS settings::
      # Optional; without them a certificate is generated at startup
      cert_file: /path/to/cert.pem
      key_file: /path/to/key.pem
-     # Common name of the generated certificate (default: hostname)
+     # Common name of the generated certificate (default: <SID>.<domain>
+     # of the system persona, or its hostname)
      common_name: PRD.example.corp
      # Ask clients for a certificate like the ICM (default yes)
      request_client_cert: yes

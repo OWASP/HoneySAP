@@ -185,7 +185,7 @@ class BaseHTTPService(BaseTCPService):
             raise ValueError("tls must be a mapping")
         self.tls_context = None
         if tls.get("enabled", False):
-            self.tls_context = server_context(tls, self.persona.hostname)
+            self.tls_context = server_context(tls, self.persona.certificate_name)
         self.max_body_bytes = self.config.get("max_body_bytes",
                                               self.default_max_body_bytes)
 
@@ -198,6 +198,10 @@ class BaseHTTPService(BaseTCPService):
     def request_details(self, request):
         """Service-specific fields added to the request event."""
         return {}
+
+    def should_log(self, request):
+        """Whether a request produces a request event."""
+        return True
 
     def non_http_response(self, kind):
         """Response to input that is not HTTP (bytes, HTTPResponse or None
