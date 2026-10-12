@@ -25,8 +25,10 @@ from random import getrandbits, randint
 from urllib.parse import parse_qs
 # External imports
 # Custom imports
+from http.client import responses as HTTP_REASONS
 from honeysap.core.http import HTTPResponse
 from honeysap.core.service import BaseHTTPService
+from honeysap.services.icm.flp import FioriLaunchpad
 
 
 TEMPLATES = os.path.join(os.path.dirname(__file__), "templates")
@@ -102,6 +104,8 @@ class SAPICMService(BaseHTTPService):
                            for path, handler in icf.items()),
                           key=lambda item: len(item[0]), reverse=True)
         super(SAPICMService, self).setup_server()
+        flp = self.config.get("fiori_launchpad") or {}
+        self.flp = FioriLaunchpad(self, flp) if flp.get("enabled", False) else None
 
     # Request dispatching
 
@@ -115,7 +119,12 @@ class SAPICMService(BaseHTTPService):
 
     def handle_request(self, request, connection):
         handler, _ = self.resolve(request.path)
-        response = getattr(self, "icf_%s" % handler)(request, connection)
+        if self.flp is not None and handler not in ("ping", "info", "icman_ping", "logoff",
+                                                    "icm_admin", "inactive") and \
+           self.flp.handles(request):
+            response = self.flp.handle(request, connection)
+        else:
+            response = getattr(self, "icf_%s" % handler)(request, connection)
         if request.method == "HEAD":
             response.body = b""
         if not request.keep_alive:
@@ -126,11 +135,26 @@ class SAPICMService(BaseHTTPService):
             response.headers.append(("connection", "close"))
         return response
 
+    def should_log(self, request):
+        """Static launchpad resources are only logged with static_assets."""
+        if self.flp is not None and not self.logging_policy.static_assets and \
+           self.flp.handles(request) and self.flp.is_static(request):
+            return False
+        return True
+
     def request_details(self, request):
         handler, prefix = self.resolve(request.path)
+        if self.flp is not None and self.flp.handles(request):
+            handler = "fiori_launchpad"
         details = {"icf_handler": handler}
         if prefix:
             details["icf_service"] = prefix
+        if self.flp is not None and handler == "fiori_launchpad":
+            session = self.flp.session(request)
+            if session is not None:
+                # Actions of a logged on launchpad user
+                details["flp_user"] = session.user
+                details["flp_client"] = session.client
         credentials = self.basic_credentials(request)
         if credentials is not None:
             details["auth_user"], details["auth_password"] = credentials
@@ -172,20 +196,29 @@ class SAPICMService(BaseHTTPService):
         user, _, password = decoded.partition(":")
         return (user, password)
 
+    @staticmethod
+    def reason(status):
+        return HTTP_REASONS.get(status, "Unknown")
+
     def response(self, request, status, reason, headers, body):
         version = "HTTP/1.0" if request.version < "HTTP/1.1" else "HTTP/1.1"
         return HTTPResponse(status, reason, headers, body, version=version)
 
-    def error_response(self, request, status, reason, status_text):
+    def error_response(self, request, status, reason, status_text, sap_system=False):
         body = (self.error_page
                 .replace(b"{{STATUS_TEXT}}", status_text.encode("utf-8"))
                 .replace(b"{{YEAR}}", str(datetime.now(timezone.utc).year).encode()))
-        return self.response(request, status, reason, [
-            ("content-type", "text/html; charset=utf-8"),
-            ("content-length", str(len(body))),
-            ("sap-server", "true"),
-            ("sap-authenticated", "false"),
-            ("sap-perf-fesrec", _perf_fesrec())], body)
+        headers = [("content-type", "text/html; charset=utf-8"),
+                   ("content-length", str(len(body)))]
+        if sap_system:
+            # Logon related errors come from the ICF logon handler
+            headers = [self.usercontext_cookie(request)] + headers + [
+                ("sap-authenticated", "false"), ("sap-system", self.persona.sid),
+                ("sap-server", "true")]
+        else:
+            headers += [("sap-server", "true"), ("sap-authenticated", "false")]
+        headers.append(("sap-perf-fesrec", _perf_fesrec()))
+        return self.response(request, status, reason, headers, body)
 
     # ICF handlers
 

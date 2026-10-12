@@ -146,6 +146,12 @@ events:
      http_headers: true
      # HTTP services: log the request body
      http_body: true
+     # HTTP services: log requests for static resources such as the UI5
+     # files of the Fiori launchpad (several hundred per page view)
+     static_assets: false
+     # HTTP services: decode query, form and JSON parameters and report
+     # submitted credentials
+     http_params: true
 
    services:
      - service: SAPGatewayService
@@ -190,10 +196,37 @@ The HTTP services (ICM and Message Server HTTP) log one event per request
 holding the exact bytes, and in ``data``: ``method``, ``target``, ``path``,
 ``query``, ``http_version``, ``scheme``, ``host``, ``user_agent``,
 ``status``, ``headers`` (``[name, value]`` pairs in received order and case,
-``http_headers``), ``body`` (``http_body``, capped by ``max_payload_bytes``)
-and ``multipart`` for multipart bodies. Conflicting framing headers such as
-``Content-Length`` together with ``Transfer-Encoding`` are kept as received.
+``http_headers``) and ``body`` (``http_body``, capped by ``max_payload_bytes``).
+Conflicting framing headers such as ``Content-Length`` together with
+``Transfer-Encoding`` are kept as received. For searching and alerting they
+add:
+
+- ``query_params`` and ``form_params``: decoded ``[name, value]`` pairs of the
+  query string and of URL-encoded or multipart forms, in order and with
+  duplicates; ``json_body``: a parsed JSON body (``http_params``).
+- ``multipart``: name, filename, content type and size of every part, the
+  value of form fields and the SHA-256 of uploaded files.
+- ``forwarded_for``: proxy headers sent by the client (``X-Forwarded-For``,
+  ``X-Real-IP``, ``Forwarded``, ``True-Client-IP``, ``Via``, ...).
+- ``tags``: known SAP attack surfaces and patterns, e.g.
+  ``cve-2025-31324-visual-composer``, ``cve-2020-6287-recon``,
+  ``sap-java-admin``, ``soap-rfc``, ``webgui``, ``icm-admin``, ``adt``,
+  ``odata``, ``odata-batch``, ``system-info``, ``message-server``,
+  ``path-traversal``, ``injection-pattern``, ``request-smuggling-te-cl``,
+  ``request-smuggling-duplicate-length``, ``file-upload``,
+  ``scanner-user-agent``, ``no-user-agent`` and ``method-<name>`` for
+  unusual methods.
+
 They also emit:
+
+``HTTP credentials submitted``
+    A user name and password sent as query or form parameters on any path
+    (``sap-user``/``sap-password``, ``j_username``/``j_password``,
+    ``username``/``password``, ...) with ``user``, ``password``, ``fields``,
+    ``path`` and ``method`` (``http_params``). Logons handled by a service
+    have their own events (``ICM authentication attempt``,
+    ``FLP logon attempt``).
+
 
 ``Non-HTTP input``
     Input that is not an HTTP request. ``data.kind`` is ``tls`` (a TLS
@@ -326,6 +359,9 @@ Dispatcher present one consistent system:
    system:
      sid: PRD
      hostname: sapnw702
+     # DNS domain; the generated TLS certificate is issued to <SID>.<domain>
+     # (default: the hostname)
+     domain: example.corp
      instance_number: "00"
      client: "001"
      # Logon language: error pages and logon screens

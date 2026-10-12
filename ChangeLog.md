@@ -42,6 +42,20 @@
   a dependency
   ([@randomstr1ng](https://github.com/randomstr1ng)).
 
+- ICM: SAP Fiori launchpad (`fiori_launchpad`) replayed from a bundle recorded
+  on an ABAP Platform system and filled with the system persona: logon page
+  and sessions with configurable credentials (`FLP logon attempt` events),
+  shell, catalogs, App Finder and apps, OData with CSRF tokens and `$batch`;
+  modifying requests are logged and refused. New `static_assets` logging
+  option ([@randomstr1ng](https://github.com/randomstr1ng)).
+
+- HTTP services: Request events add decoded query, form and JSON
+  parameters, SHA-256 of uploaded files, proxy headers and `tags` for known
+  SAP attack patterns (Visual Composer CVE-2025-31324, RECON CVE-2020-6287,
+  request smuggling, path traversal, ...); credentials sent as parameters on
+  any path produce `HTTP credentials submitted` events. New `http_params`
+  logging option ([@randomstr1ng](https://github.com/randomstr1ng)).
+
 ### Bug fixes
 
 - Virtual HTTP services no longer bind sockets, so `profiles/external.yml`

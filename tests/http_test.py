@@ -18,6 +18,7 @@ import ssl
 import threading
 import unittest
 from base64 import b64decode
+from hashlib import sha256
 from unittest.mock import Mock
 # External imports
 # Custom imports
@@ -117,7 +118,12 @@ class HTTPFrontTest(HTTPServiceHarness, unittest.TestCase):
         self.assertEqual(b64decode(data["body"]["value"]), body)
         self.assertEqual(data["multipart"], [{"name": "file", "filename": "shell.jsp",
                                               "content_type": "application/octet-stream",
-                                              "size": 10}])
+                                              "size": 10,
+                                              "sha256": sha256(b"<% exec %>").hexdigest()}])
+        self.assertEqual(data["query_params"], [["CONTENT", "x"]])
+        self.assertIn("cve-2025-31324-visual-composer", data["tags"])
+        self.assertIn("file-upload", data["tags"])
+        self.assertIn("injection-pattern", data["tags"])
         self.assertEqual(logged["source_port"], 40001)
         self.assertTrue(logged["connection_id"])
 
@@ -131,6 +137,39 @@ class HTTPFrontTest(HTTPServiceHarness, unittest.TestCase):
         self.assertEqual(event.data["body"], b"hello")
         self.assertIn(["Content-Length", "4"], event.data["headers"])
         self.assertIn(["Transfer-Encoding", "chunked"], event.data["headers"])
+
+    def test_form_credentials_and_forwarding_headers(self):
+        body = b"j_username=admin&j_password=s3cret&x=1&x=2"
+        wire = (b"POST /irj/portal?a=%%2e%%2e%%2fetc HTTP/1.1\r\nHost: x\r\n"
+                b"User-Agent: Mozilla/5.0 (Nuclei)\r\nX-Forwarded-For: 10.1.1.1\r\n"
+                b"Content-Type: application/x-www-form-urlencoded\r\n"
+                b"Content-Length: %d\r\nConnection: close\r\n\r\n" % len(body)) + body
+        _, events = self.exchange(SAPICMService, wire)
+        request = self.named(events, "ICM HTTP request")[0].data
+        self.assertEqual(request["form_params"], [["j_username", "admin"], ["j_password", "s3cret"],
+                                                  ["x", "1"], ["x", "2"]])
+        self.assertEqual(request["forwarded_for"], {"x-forwarded-for": "10.1.1.1"})
+        for tag in ("sap-java-admin", "path-traversal", "scanner-user-agent"):
+            self.assertIn(tag, request["tags"])
+        submitted = self.named(events, "HTTP credentials submitted")[0].data
+        self.assertEqual((submitted["user"], submitted["password"], submitted["path"]),
+                         ("admin", "s3cret", "/irj/portal"))
+
+    def test_json_body_and_params_flag(self):
+        body = b'{"user": "x"}'
+        wire = (b"POST /sap/opu/odata/x HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+                b"Content-Length: %d\r\nConnection: close\r\n\r\n" % len(body)) + body
+        _, events = self.exchange(SAPICMService, wire)
+        self.assertEqual(self.named(events, "ICM HTTP request")[0].data["json_body"], {"user": "x"})
+        _, events = self.exchange(SAPICMService, wire, logging={"http_params": False})
+        self.assertNotIn("json_body", self.named(events, "ICM HTTP request")[0].data)
+
+    def test_smuggling_tag(self):
+        wire = (b"POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 4\r\n"
+                b"Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n0\r\n\r\n")
+        _, events = self.exchange(SAPICMService, wire)
+        self.assertIn("request-smuggling-te-cl",
+                      self.named(events, "ICM HTTP request")[0].data["tags"])
 
     def test_keep_alive_serves_several_requests_on_one_connection(self):
         wire = b"GET /a HTTP/1.1\r\nHost: x\r\n\r\nGET /b HTTP/1.1\r\nHost: x\r\n\r\n"

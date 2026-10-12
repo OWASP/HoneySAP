@@ -38,6 +38,10 @@ logging:
     http_headers: true
     # HTTP services: log the request body
     http_body: true
+    # HTTP services: log static resources (UI5 files of the launchpad)
+    static_assets: false
+    # HTTP services: decode parameters and report submitted credentials
+    http_params: true
 
 
 # SAP instance configuration

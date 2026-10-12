@@ -21,12 +21,11 @@ logged before a service (or its WSGI application) answers them."""
 import re
 import socket
 import ssl
-from email.parser import BytesParser
-from email.policy import HTTP as HTTP_POLICY
 from socketserver import BaseRequestHandler, ThreadingMixIn, TCPServer
 from time import monotonic
 # External imports
 # Custom imports
+from . import http_analysis
 from .evidence import WireTap, connection_closed
 from .logger import Loggeable
 from .tls import looks_like_tls, parse_client_hello
@@ -227,26 +226,6 @@ class RequestReader(object):
         return bytes(body)
 
 
-def multipart_parts(request):
-    """Describe the parts of a multipart body (name, filename, type, size)."""
-    content_type = request.header("Content-Type") or ""
-    if not content_type.lower().startswith("multipart/"):
-        return None
-    try:
-        message = BytesParser(policy=HTTP_POLICY).parsebytes(
-            b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + request.body)
-    except Exception:
-        return None
-    parts = []
-    for part in message.iter_parts() if message.is_multipart() else []:
-        payload = part.get_payload(decode=True) or b""
-        parts.append({"name": part.get_param("name", header="content-disposition") or "",
-                      "filename": part.get_filename() or "",
-                      "content_type": part.get_content_type(),
-                      "size": len(payload)})
-    return parts
-
-
 class HTTPServerThreaded(ThreadingMixIn, TCPServer):
     daemon_threads = True
 
@@ -418,6 +397,8 @@ class HTTPConnectionHandler(Loggeable, BaseRequestHandler):
         return keep_alive
 
     def log_request(self, request, response, sent):
+        if not self.service.should_log(request):
+            return
         data = {"method": request.method,
                 "target": request.target,
                 "path": request.path,
@@ -434,13 +415,36 @@ class HTTPConnectionHandler(Loggeable, BaseRequestHandler):
             data["body"] = request.body[:self.policy.max_payload_bytes or None]
             if self.policy.max_payload_bytes and len(request.body) > self.policy.max_payload_bytes:
                 data["body_truncated"] = True
-        parts = multipart_parts(request)
-        if parts is not None:
-            data["multipart"] = parts
+        self.analyze(request, data)
         data.update(self.service.request_details(request))
         self.session.add_event(self.service.request_event_name, data=data,
                                request=request.raw,
                                response=sent if self.policy.response_events else None)
+
+    def analyze(self, request, data):
+        """Decoded parameters, uploads, credentials, forwarding headers and
+        attack pattern tags of a request."""
+        parts = http_analysis.multipart_parts(request)
+        if parts is not None:
+            data["multipart"] = parts
+        if self.policy.http_params:
+            params = http_analysis.query_params(request)
+            if params:
+                data["query_params"] = params
+            form = http_analysis.form_params(request, parts)
+            if form:
+                data["form_params"] = form
+            parsed = http_analysis.json_body(request, self.policy.max_payload_bytes or 1 << 20)
+            if parsed is not None:
+                data["json_body"] = parsed
+            submitted = http_analysis.credentials(params + form)
+            if submitted and not getattr(request, "credentials_logged", False):
+                submitted.update({"path": request.path, "method": request.method})
+                self.session.add_event("HTTP credentials submitted", data=submitted)
+        forwarded = http_analysis.forwarded_for(request)
+        if forwarded:
+            data["forwarded_for"] = forwarded
+        data["tags"] = http_analysis.tags(request, parts)
 
     def finish(self):
         if self.secure is not None:
@@ -457,4 +461,3 @@ class HTTPConnectionHandler(Loggeable, BaseRequestHandler):
         if self.policy.connection_events != "none":
             connection_closed(self.session, self.client_address, self.started,
                               self.tap, self.requests, self.close_reason)
-

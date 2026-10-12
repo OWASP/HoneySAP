@@ -40,6 +40,10 @@ logging:
     http_headers: true
     # HTTP services: log the request body
     http_body: true
+    # HTTP services: log static resources (UI5 files of the launchpad)
+    static_assets: false
+    # HTTP services: decode parameters and report submitted credentials
+    http_params: true
 
 
 # SAP system configuration
@@ -115,6 +119,13 @@ services:
             # Without cert_file/key_file a certificate is generated at
             # startup; mimic_icm copies the ICM TLS behavior
             mimic_icm: yes
+        # SAP Fiori launchpad, see docs/user/services/icm.rst
+        fiori_launchpad:
+            enabled: yes
+            bundle: data/icm/flp/flp_bundle.tar.xz
+            # list (default credentials or "credentials:"), accept_any or
+            # reject_all
+            auth_mode: list
 
     -
         # SAP Message Server (TCP) service

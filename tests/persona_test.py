@@ -48,3 +48,11 @@ class SystemPersonaTest(unittest.TestCase):
     def test_info_xml_escapes_values(self):
         xml = SystemPersona(hostname="a<b").rfc_system_info_xml()
         self.assertIn("<RFCHOST2>a&lt;b</RFCHOST2>", xml)
+
+
+class CertificateNameTest(unittest.TestCase):
+
+    def test_certificate_name(self):
+        self.assertEqual(SystemPersona(sid="A4H", domain="wdf.sap.corp").certificate_name,
+                         "A4H.wdf.sap.corp")
+        self.assertEqual(SystemPersona(hostname="sapprd").certificate_name, "sapprd")
