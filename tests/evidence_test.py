@@ -17,8 +17,9 @@ import socket
 import unittest
 from base64 import b64decode
 from struct import pack
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 # External imports
+from pysap.SAPDiag import SAPDiag, SAPDiagDP
 from pysap.SAPMS import SAPMS
 from pysap.SAPNI import SAPNIStreamSocket
 # Custom imports
@@ -29,7 +30,8 @@ from honeysap.core.session import Session, SessionManager
 from honeysap.services.dispatcher.dispatcher import SAPDispatcherService
 from honeysap.services.gateway.gateway import SAPGatewayService
 from honeysap.services.messageserver.messageserver import SAPMSService
-from honeysap.services.saprouter.saprouter import SAPRouterService
+from honeysap.services.saprouter.saprouter import (
+    SAPRouterService, SAPRouterServerHandler)
 
 
 def ni_frame(payload):
@@ -274,15 +276,11 @@ class ServiceEvidenceTest(unittest.TestCase):
 
     def test_handler_exception_is_reported_as_unparsed(self):
         wire = ni_frame(MS_PAYLOAD)
-        original = SAPMSService.handler_cls.handle_data
 
         def broken(handler):
             raise ValueError("boom")
-        SAPMSService.handler_cls.handle_data = broken
-        try:
+        with patch.object(SAPMSService.handler_cls, "handle_data", broken):
             events = self.run_service(SAPMSService, wire)
-        finally:
-            SAPMSService.handler_cls.handle_data = original
         unparsed = self.events_named(events, "Unparsed input")
         self.assertEqual(len(unparsed), 1)
         self.assertEqual(unparsed[0].data["stage"], "handle_data")
@@ -315,12 +313,112 @@ class ServiceEvidenceTest(unittest.TestCase):
         self.assertTrue(received.data["request_truncated"])
         self.assertEqual(received.data["request_size"], len(wire))
 
+    def test_default_logs_only_connection_closed(self):
+        events = self.run_service(SAPMSService, b"")
+        self.assertEqual([event.event for event in events], ["Connection closed"])
+
+    def test_unparsed_input_can_be_disabled(self):
+        wire = pack("!I", 100) + b"partial"
+        events = self.run_service(SAPGatewayService, wire,
+                                  logging={"unparsed_input": False})
+        self.assertEqual(self.events_named(events, "Unparsed input"), [])
+        self.assertEqual(self.events_named(events, "Connection closed")[0].data["bytes_in"],
+                         len(wire))
+
+    def test_raw_payloads_can_be_disabled(self):
+        wire = ni_frame(GENERIC_PAYLOAD)
+        events = self.run_service(SAPGatewayService, wire,
+                                  logging={"raw_payloads": False})
+        received = self.events_named(events, "Received packet")[0]
+        self.assertIsNone(received.request)
+        self.assertEqual(received.data["request_size"], len(wire))
+        sent = self.events_named(events, "Sent packet")[0]
+        self.assertIsNone(sent.response)
+        self.assertEqual(json.loads(repr(received))["request"], "")
+
+    def test_invalid_logging_configuration_stops_the_service(self):
+        with self.assertRaises(ValueError):
+            self.run_service(SAPMSService, b"", logging={"max_payload_bytes": "lots"})
+
+    def test_socket_timeout_reports_partial_frame(self):
+        manager = SessionManager(Configuration())
+        service = SAPGatewayService(Configuration({"enabled": True, "virtual": True,
+                                                   "listener_address": "127.0.0.1",
+                                                   "listener_port": 1}),
+                                    Mock(), manager, Mock())
+        client, server_side = socket.socketpair()
+        try:
+            wire = pack("!I", 100) + b"partial"
+            client.sendall(wire)
+            # The client stays connected: the read times out
+            server_side.settimeout(0.2)
+            stream = SAPNIStreamSocket(server_side, base_cls=service.server.base_cls)
+            service.handle_virtual(stream, ("192.0.2.1", 40000))
+        finally:
+            client.close()
+            server_side.close()
+        events = []
+        while not manager.event_queue.empty():
+            events.append(manager.event_queue.get())
+        unparsed = self.events_named(events, "Unparsed input")
+        self.assertEqual(unparsed[0].request, wire)
+        self.assertEqual(unparsed[0].data["stage"], "recv")
+        self.assertEqual(self.events_named(events, "Connection closed")[0]
+                         .data["close_reason"], "timeout")
+
+    def test_saprouter_timeout_close_reason(self):
+        def timeout(handler):
+            raise handler._timeout
+        with patch.object(SAPRouterServerHandler, "receive_packet", timeout):
+            events = self.run_service(SAPRouterService, b"", {"release": 720})
+        self.assertEqual(self.events_named(events, "Connection closed")[0]
+                         .data["close_reason"], "timeout")
+
+    def test_saprouter_routed_connection_keeps_its_close_reason(self):
+        def route(handler):
+            handler.server.clients[handler.client_address].routed = True
+            return True
+
+        def routed(handler):
+            raise ConnectionResetError("target closed")
+        with patch.object(SAPRouterServerHandler, "receive_packet", route), \
+                patch.object(SAPRouterServerHandler, "handle_data", lambda handler: None), \
+                patch.object(SAPRouterServerHandler, "handle_routed", routed):
+            events = self.run_service(SAPRouterService, b"", {"release": 720})
+        self.assertEqual(self.events_named(events, "Connection closed")[0]
+                         .data["close_reason"], "routed")
+
+    def test_dispatcher_events_carry_wire_bytes(self):
+        wire = ni_frame(bytes(SAPDiagDP() / SAPDiag()))
+        events = self.run_service(SAPDispatcherService, wire)
+        init = self.events_named(events, "Initialization request received")[0]
+        self.assertEqual(init.request, wire)
+        self.assertIsInstance(init.response, bytes)
+        sent = self.events_named(events, "Sent packet")[0]
+        # The login screen as sent, with its NI length header
+        self.assertEqual(sent.response[4:], init.response)
+        self.assertEqual(sent.response[:4], pack("!I", len(init.response)))
+
+
+class ProfileTest(unittest.TestCase):
+
+    def test_packaged_profiles_have_valid_logging_options(self):
+        for profile in ("profiles/internal.yml", "profiles/external.yml"):
+            with self.subTest(profile=profile):
+                config = Configuration()
+                config.update(profile, from_file=True)
+                self.assertIn("logging", config)
+                for service in config.services:
+                    for service_config in config.config_for("services", "service",
+                                                            service["service"]):
+                        LoggingPolicy.from_config(service_config)
+
 
 def test_suite():
     suite = unittest.TestSuite()
     loader = unittest.TestLoader()
     for case in (LoggingPolicyTest, SessionPolicyTest, WireTapTest,
-                 ServiceEvidenceTest):
+                 ServiceEvidenceTest, ProfileTest):
         suite.addTest(loader.loadTestsFromTestCase(case))
     return suite
 
