@@ -32,6 +32,7 @@ from pysap.SAPNWRFC import (find_tlv_field_by_marker, find_tlv_field_by_padd,
 from pysap.utils.crypto.rfc import ab_descramble
 # Custom imports
 from honeysap.core.logger import Loggeable
+from honeysap.core.evidence import EvidenceHandlerMixin
 from honeysap.core.service import BaseTCPService
 from honeysap.services.gateway.rfcsi_data import get_ddif_body
 from honeysap.services.gateway.rfm_catalog import load_rfm_catalog
@@ -962,7 +963,7 @@ class SAPGatewayClient(Loggeable, SAPNIClient):
     ddif_call_count = 0  # Tracks DDIF_FIELDINFO_GET call sequence (0-2)
 
 
-class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
+class SAPGatewayServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandler):
 
     @property
     def hostname(self):
@@ -1032,17 +1033,17 @@ class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
 
     def handle_data(self):
         """Handles a received packet, dispatching by version/type."""
-        self.session.add_event("Received packet", request=str(self.packet))
-
         # With base_cls=None the NI payload is not auto-decoded as SAPRFC.
         # We extract raw bytes from the SAPNI "payload" field directly.
         try:
             raw = bytes(self.packet.payload)
-        except Exception:
+        except Exception as error:
             self.logger.debug("Failed to get payload bytes from %s",
                               str(self.client_address))
+            self.record_unparsed(error, "ni_payload")
             return
         if len(raw) < 2:
+            self.record_unparsed(None, "short_payload")
             return
 
         try:
