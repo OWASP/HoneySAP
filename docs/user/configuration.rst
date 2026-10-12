@@ -311,21 +311,42 @@ retried. Feed and service configurations receive only their own settings and
 safe shared defaults; sibling credentials are not propagated.
 
 
-SAP instance configuration
-''''''''''''''''''''''''''
+.. _system-persona:
 
-The following are configuration options related to the SAP instance:
+SAP system configuration
+''''''''''''''''''''''''
+
+The ``system:`` mapping describes the emulated SAP system. All services report
+these values, so the RFC Gateway (``RFC_SYSTEM_INFO``), the ICM
+(``/sap/public/info``, error pages, logon realm), the Message Server and the
+Dispatcher present one consistent system:
 
 .. code-block:: yaml
 
-   # SAP instance configuration
-   # --------------------------
-   
-   # Release version
-   release: "720"
-   
-   # Hostname
-   hostname: sapnw702
+   system:
+     sid: PRD
+     hostname: sapnw702
+     instance_number: "00"
+     client: "001"
+     # Logon language: error pages and logon screens
+     language: EN
+     # SAP_BASIS release (RFCSAPRL) and kernel release (RFCKERNRL)
+     release: "816"
+     kernel_release: "916"
+     db_system: HDB
+     # Database host, defaults to hostname
+     db_host: sapnw702
+     os: Linux
+     # Address reported to clients, defaults to the address they connected to
+     ip_address: 192.0.2.10
+     # UTC offset in seconds and machine type (RFCTZONE, RFCMACH)
+     timezone_offset: 0
+     machine_id: "390"
+
+The older options ``hostname``, ``sid``, ``instance_number``, ``client_no``,
+``sap_release``, ``db_system`` and ``os_name``, set globally or on a service,
+still override the ``system:`` values, so existing profiles keep working and
+several virtual instances can present different systems.
 
 
 Versioned behavior profiles

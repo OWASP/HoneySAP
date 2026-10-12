@@ -967,19 +967,19 @@ class SAPGatewayServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandle
 
     @property
     def hostname(self):
-        return self.config.get("hostname", "sapnw702")
+        return self.persona.hostname
 
     @property
     def sid(self):
-        return self.config.get("sid", "PRD")
+        return self.persona.sid
 
     @property
     def instance_number(self):
-        return self.config.get("instance_number", "00")
+        return self.persona.instance_number
 
     @property
     def kernel_version(self):
-        return self.config.get("kernel_version", "7200")
+        return str(self.config.get("kernel_version", self.persona.kernel_release))
 
     @property
     def gateway_version(self):
@@ -991,15 +991,15 @@ class SAPGatewayServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandle
 
     @property
     def sap_release(self):
-        return self.config.get("sap_release", "752")
+        return self.persona.release
 
     @property
     def db_system(self):
-        return self.config.get("db_system", "HDB")
+        return self.persona.db_system
 
     @property
     def os_name(self):
-        return self.config.get("os_name", "Linux")
+        return self.persona.os
 
     def __init__(self, request, client_address, server):
         self.config = server.config
@@ -2325,34 +2325,15 @@ class SAPGatewayServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandle
                 return name
         return None
 
+    @property
+    def persona(self):
+        return self.server.persona
+
     def _build_rfcsi_string(self):
-        """Build the 245-character RFCSI structure string with honeypot
-        system information."""
-        server_ip = self.server.server_address[0] or "127.0.0.1"
-        dest = "%s_%s_%s" % (self.hostname, self.sid, self.instance_number)
-        krel = self.kernel_version[:3]
-        values = {
-            "RFCPROTO": "011",
-            "RFCCHARTYP": "4103",
-            "RFCINTTYP": "LIT",
-            "RFCFLOTYP": "IE3",
-            "RFCDEST": dest,
-            "RFCHOST": self.hostname[:8],
-            "RFCSYSID": self.sid,
-            "RFCDATABS": self.sid,
-            "RFCDBHOST": self.hostname,
-            "RFCDBSYS": self.db_system,
-            "RFCSAPRL": self.sap_release,
-            "RFCMACH": "390",
-            "RFCOPSYS": self.os_name,
-            "RFCTZONE": "7200",
-            "RFCDAYST": "",
-            "RFCIPADDR": server_ip,
-            "RFCKERNRL": krel,
-            "RFCHOST2": self.hostname,
-            "RFCSI_RESV": "",
-            "RFCIPV6ADDR": server_ip,
-        }
+        """Build the 245-character RFCSI structure string from the system
+        persona."""
+        values = dict(self.persona.rfcsi(self.server.server_address[0]))
+        values["RFCKERNRL"] = self.kernel_version[:3]
         result = ""
         for name, width in _RFCSI_FIELDS:
             result += values.get(name, "").ljust(width)[:width]

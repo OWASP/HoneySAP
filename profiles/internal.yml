@@ -42,11 +42,26 @@ logging:
     http_body: true
 
 
-# SAP instance configuration
-# --------------------------
+# SAP system configuration
+# ------------------------
+# Identity of the emulated system, reported the same way by all services.
+# Service options with the same meaning (hostname, sid, instance_number,
+# client_no, sap_release, db_system, os_name) override these values.
 
-# Release version
-release: "720"
+system:
+    sid: PRD
+    hostname: sapnw702
+    instance_number: "00"
+    client: "001"
+    # Logon language (error pages, logon screens)
+    language: EN
+    # SAP_BASIS release and kernel release
+    release: "816"
+    kernel_release: "916"
+    db_system: HDB
+    os: Linux
+    # Address reported to clients; defaults to the address they connected to
+    # ip_address: 192.0.2.10
 
 
 # Services configuration
@@ -61,18 +76,6 @@ services:
         enabled: yes
         listener_port: 3200
 
-        # Name of the instance
-        instance: NSP
-        
-        # Client number
-        client_no: "001"
-        
-        # SID
-        sid: PRD
-        
-        # Hostname
-        hostname: sapnw702
-
     -
         # SAP Gateway service
         # -------------------
@@ -81,9 +84,6 @@ services:
         enabled: yes
         listener_port: 3300
         listener_address: 0.0.0.0
-        hostname: sapnw702
-        sid: PRD
-        instance_number: "00"
 
         # Optional: path to a semicolon-delimited RFM catalog CSV (exported
         # from SAP with columns FUNCNAME;REMOTE_CALL;UPDATE_TASK;...PARAMTEXT).
@@ -102,8 +102,19 @@ services:
         alias: ICMService
         enabled: yes
         listener_port: 8000
-        release: "720"
-        hostname: sapnw702
+
+    -
+        # SAP ICM (HTTPS) service
+        # -----------------------
+        service: SAPICMService
+        alias: ICMHTTPSService
+        enabled: yes
+        listener_port: 44300
+        tls:
+            enabled: yes
+            # Without cert_file/key_file a certificate is generated at
+            # startup; mimic_icm copies the ICM TLS behavior
+            mimic_icm: yes
 
     -
         # SAP Message Server (TCP) service
@@ -120,9 +131,6 @@ services:
         alias: MessageServerHTTPService
         enabled: yes
         listener_port: 8100
-        release: 720
-        instance: PRD
-        hostname: sapnw702
         # Redirect clients to the ICM authority they used to reach this service.
         redirect_hostname: request
 

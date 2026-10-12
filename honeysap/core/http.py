@@ -21,13 +21,10 @@ logged before a service (or its WSGI application) answers them."""
 import re
 import socket
 import ssl
-import sys
 from email.parser import BytesParser
 from email.policy import HTTP as HTTP_POLICY
-from io import BytesIO
 from socketserver import BaseRequestHandler, ThreadingMixIn, TCPServer
 from time import monotonic
-from urllib.parse import unquote_to_bytes
 # External imports
 # Custom imports
 from .evidence import WireTap, connection_closed
@@ -461,66 +458,3 @@ class HTTPConnectionHandler(Loggeable, BaseRequestHandler):
             connection_closed(self.session, self.client_address, self.started,
                               self.tap, self.requests, self.close_reason)
 
-
-class WSGIBridge(object):
-    """Run a WSGI application for an HTTPRequest."""
-
-    def __init__(self, app):
-        self.app = app
-
-    def __call__(self, request, connection):
-        server_name, server_port = connection.server.server_address[:2]
-        path = unquote_to_bytes(request.path).decode("latin-1")
-        environ = {
-            "REQUEST_METHOD": request.method,
-            "SCRIPT_NAME": "",
-            "PATH_INFO": path,
-            "QUERY_STRING": request.query,
-            "SERVER_NAME": str(server_name),
-            "SERVER_PORT": str(server_port),
-            "SERVER_PROTOCOL": request.version,
-            "REMOTE_ADDR": str(connection.client_address[0]),
-            "REMOTE_PORT": str(connection.client_address[1]),
-            "REQUEST_URI": request.target,
-            "RAW_URI": request.target,
-            "wsgi.version": (1, 0),
-            "wsgi.url_scheme": request.scheme,
-            "wsgi.input": BytesIO(request.body),
-            "wsgi.errors": sys.stderr,
-            "wsgi.multithread": True,
-            "wsgi.multiprocess": False,
-            "wsgi.run_once": False,
-            "honeysap.request": request,
-            "honeysap.connection": connection,
-        }
-        for name, value in request.headers:
-            key = name.upper().replace("-", "_")
-            if key == "CONTENT_TYPE":
-                environ["CONTENT_TYPE"] = value
-            elif key == "CONTENT_LENGTH":
-                environ["CONTENT_LENGTH"] = value
-            else:
-                key = "HTTP_" + key
-                if key in environ:
-                    environ[key] += "," + value
-                else:
-                    environ[key] = value
-        if request.body and "CONTENT_LENGTH" not in environ:
-            environ["CONTENT_LENGTH"] = str(len(request.body))
-
-        status_headers = []
-
-        def start_response(status, headers, exc_info=None):
-            status_headers[:] = [status, headers]
-
-        result = self.app(environ, start_response)
-        try:
-            body = b"".join(result)
-        finally:
-            if hasattr(result, "close"):
-                result.close()
-        status, headers = status_headers
-        code, _, reason = status.partition(" ")
-        return HTTPResponse(int(code), reason, headers, body,
-                            version="HTTP/1.1" if request.version >= "HTTP/1.1"
-                            else "HTTP/1.0")

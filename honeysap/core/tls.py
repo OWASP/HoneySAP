@@ -174,67 +174,142 @@ def ja4(version, ciphers, extensions, sni, alpn, signature_algorithms):
     return "%s_%s_%s" % (part_a, part_b, part_c)
 
 
+# Cipher suites accepted by an ICM HTTPS port, in its preference order
+ICM_CIPHERS = ":".join([
+    "ECDHE-RSA-AES128-GCM-SHA256", "ECDHE-RSA-AES256-GCM-SHA384",
+    "ECDHE-RSA-AES256-SHA384", "ECDHE-RSA-AES256-SHA", "ECDHE-RSA-AES128-SHA",
+    "AES256-GCM-SHA384", "AES128-GCM-SHA256", "AES256-SHA", "AES128-SHA"])
+
+# CA hierarchy of an SAP installation certificate, from the root down. The
+# ICM advertises both as client certificate CAs.
+ICM_CAS = [
+    {"country": "DE", "locality": "Walldorf", "organization": "SAP AG",
+     "common_name": "SAP Global Root CA"},
+    {"country": "DE", "locality": "Walldorf", "organization": "SAP",
+     "common_name": "SAPNetCA_G2"},
+]
+
+
+def _name(country=None, locality=None, organization=None, units=(),
+          common_name=None):
+    from cryptography import x509
+    from cryptography.x509.oid import NameOID
+    attributes = []
+    if country:
+        attributes.append(x509.NameAttribute(NameOID.COUNTRY_NAME, country))
+    if locality:
+        attributes.append(x509.NameAttribute(NameOID.LOCALITY_NAME, locality))
+    if organization:
+        attributes.append(x509.NameAttribute(NameOID.ORGANIZATION_NAME, organization))
+    for unit in units:
+        attributes.append(x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, unit))
+    if common_name:
+        attributes.append(x509.NameAttribute(NameOID.COMMON_NAME, common_name))
+    return x509.Name(attributes)
+
+
+def _certificate(subject, issuer, public_key, signing_key, days, ca=False):
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes
+    now = datetime.now(timezone.utc) - timedelta(days=30)
+    builder = (x509.CertificateBuilder()
+               .subject_name(subject)
+               .issuer_name(issuer)
+               .public_key(public_key)
+               .serial_number(x509.random_serial_number())
+               .not_valid_before(now)
+               .not_valid_after(now + timedelta(days=days)))
+    if ca:
+        builder = builder.add_extension(x509.BasicConstraints(ca=True, path_length=None),
+                                        critical=True)
+    return builder.sign(signing_key, hashes.SHA256())
+
+
+def _pem(certificate):
+    from cryptography.hazmat.primitives import serialization
+    return certificate.public_bytes(serialization.Encoding.PEM)
+
+
+def _key_pem(key):
+    from cryptography.hazmat.primitives import serialization
+    return key.private_bytes(serialization.Encoding.PEM,
+                             serialization.PrivateFormat.TraditionalOpenSSL,
+                             serialization.NoEncryption())
+
+
 def generate_certificate(common_name, organization="SAP",
                          units=("SAP Web AS", "INITIAL"), country="DE",
-                         issuer_name="SAPNetCA_G2", issuer_locality="Walldorf",
-                         days=365, key_size=2048):
-    """Generate an SAP-style server certificate and key (PEM bytes).
+                         issuers=None, days=365, key_size=2048):
+    """Generate an SAP-style server certificate.
 
-    Real systems use a certificate issued by the installation's own CA; the
-    issuer name is reproduced but the certificate is self-signed."""
-    from cryptography import x509
-    from cryptography.hazmat.primitives import hashes, serialization
+    Returns (chain PEM, key PEM, CA certificates PEM). ``issuers`` is a list
+    of CA names (mappings of _name() arguments) from the root down: a CA is
+    generated for each, every CA signs the next one and the last signs the
+    server certificate, like an installation CA does. The chain holds the
+    server certificate and the CAs below the root. Without issuers the
+    certificate is self-signed."""
     from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.x509.oid import NameOID
-
     key = rsa.generate_private_key(public_exponent=65537, key_size=key_size)
-    subject = x509.Name(
-        [x509.NameAttribute(NameOID.COUNTRY_NAME, country),
-         x509.NameAttribute(NameOID.ORGANIZATION_NAME, organization)] +
-        [x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, unit) for unit in units] +
-        [x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
-    issuer = x509.Name([
-        x509.NameAttribute(NameOID.COUNTRY_NAME, country),
-        x509.NameAttribute(NameOID.LOCALITY_NAME, issuer_locality),
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, organization),
-        x509.NameAttribute(NameOID.COMMON_NAME, issuer_name)])
-    now = datetime.now(timezone.utc) - timedelta(days=30)
-    certificate = (x509.CertificateBuilder()
-                   .subject_name(subject)
-                   .issuer_name(issuer)
-                   .public_key(key.public_key())
-                   .serial_number(x509.random_serial_number())
-                   .not_valid_before(now)
-                   .not_valid_after(now + timedelta(days=days))
-                   .sign(key, hashes.SHA256()))
-    return (certificate.public_bytes(serialization.Encoding.PEM),
-            key.private_bytes(serialization.Encoding.PEM,
-                              serialization.PrivateFormat.TraditionalOpenSSL,
-                              serialization.NoEncryption()))
+    subject = _name(country, None, organization, units, common_name)
+    if not issuers:
+        certificate = _certificate(subject, subject, key.public_key(), key, days)
+        return _pem(certificate), _key_pem(key), b""
+    cas = []
+    signing_name, signing_key = None, None
+    for issuer in issuers:
+        ca_key = rsa.generate_private_key(public_exponent=65537, key_size=key_size)
+        ca_name = _name(**issuer)
+        ca_certificate = _certificate(ca_name, signing_name or ca_name,
+                                      ca_key.public_key(), signing_key or ca_key,
+                                      days * 10, ca=True)
+        cas.append(ca_certificate)
+        signing_name, signing_key = ca_name, ca_key
+    certificate = _certificate(subject, signing_name, key.public_key(), signing_key, days)
+    chain = _pem(certificate) + b"".join(_pem(ca) for ca in reversed(cas[1:]))
+    # Client CA names are advertised from the issuing CA up to the root
+    return chain, _key_pem(key), b"".join(_pem(ca) for ca in reversed(cas))
+
+
+def _write(directory, name, data, private=False):
+    path = os.path.join(directory, name)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    with open(os.open(path, flags, 0o600 if private else 0o644), "wb") as f:
+        f.write(data)
+    return path
 
 
 def server_context(config, default_common_name):
     """Build the server SSL context for an HTTP service ``tls:`` mapping.
 
     Uses ``cert_file``/``key_file`` when given, otherwise generates a
-    certificate for ``common_name`` at startup."""
+    certificate for ``common_name`` at startup. With ``mimic_icm`` (default)
+    the listener behaves like an ICM HTTPS port: certificate issued by a
+    generated SAPNetCA_G2, TLS 1.2 only, the ICM cipher suites in its
+    order, and the ICM's client certificate CA names."""
+    mimic = config.get("mimic_icm", True)
+    directory = tempfile.mkdtemp(prefix="honeysap-tls-")
     cert_file = config.get("cert_file")
     key_file = config.get("key_file")
+    ca_file = config.get("client_ca_file")
     if not cert_file:
-        cert, key = generate_certificate(config.get("common_name", default_common_name))
-        directory = tempfile.mkdtemp(prefix="honeysap-tls-")
-        cert_file = os.path.join(directory, "cert.pem")
-        key_file = os.path.join(directory, "key.pem")
-        with open(cert_file, "wb") as f:
-            f.write(cert)
-        with open(os.open(key_file, os.O_WRONLY | os.O_CREAT, 0o600), "wb") as f:
-            f.write(key)
+        chain, key, cas = generate_certificate(
+            config.get("common_name", default_common_name),
+            issuers=ICM_CAS if mimic else None)
+        cert_file = _write(directory, "cert.pem", chain)
+        key_file = _write(directory, "key.pem", key, private=True)
+        if cas and not ca_file:
+            ca_file = _write(directory, "client_cas.pem", cas)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(cert_file, key_file)
     context.set_alpn_protocols(["http/1.1"])
+    if mimic:
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.maximum_version = ssl.TLSVersion.TLSv1_2
+        context.set_ciphers(ICM_CIPHERS)
+        context.options |= ssl.OP_CIPHER_SERVER_PREFERENCE
     if config.get("request_client_cert", True):
         # Ask for a client certificate like the ICM does; only clients holding
-        # a certificate of the advertised CA will send one.
+        # a certificate of an advertised CA will send one.
         context.verify_mode = ssl.CERT_OPTIONAL
-        context.load_verify_locations(cafile=cert_file)
+        context.load_verify_locations(cafile=ca_file or cert_file)
     return context

@@ -1,5 +1,4 @@
 pysap==0.2.1
-flask>=2.0
 gevent>=21.1.0
 SQLAlchemy>=1.4.11
 PyYAML>=5.4.1

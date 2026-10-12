@@ -300,9 +300,14 @@ class Configuration(Values):
             allowed = {"service", "alias", "enabled", "virtual",
                        "listener_address", "listener_port", "release",
                        "hostname", "instance"}
-            scoped["services"] = [{key: value for key, value in service.items()
-                                   if key in allowed}
-                                  for service in self.get("services", [])]
+            scoped["services"] = []
+            for service in self.get("services", []):
+                visible = {key: value for key, value in service.items()
+                           if key in allowed}
+                # Whether a sibling uses TLS, without its certificate settings
+                if isinstance(service.get("tls"), dict):
+                    visible["tls"] = {"enabled": bool(service["tls"].get("enabled"))}
+                scoped["services"].append(visible)
         return scoped
 
     def get(self, option, default=None):
