@@ -69,13 +69,14 @@ Capabilities
 
 **HTTP request logging**
 
-All inbound HTTP requests are parsed and a session event is recorded:
+Every request produces an ``MS HTTP request`` event with the same fields as
+the ICM (raw request and response bytes, all headers, body; see
+:ref:`HTTP services evidence <http-evidence>`) plus ``action``:
 
-- Requests to paths beginning with ``/msgserver`` are recorded as
-  ``MS HTTP request to msgserver`` with ``method``, ``path``,
-  ``user_agent``, and ``host``; they receive HTTP 404.
-- All other paths are redirected to the ICM service (HTTP 301) and
-  recorded as ``MS HTTP request redirected to ICM``.
+- ``msgserver`` for paths beginning with ``/msgserver``; they receive
+  HTTP 404.
+- ``redirect_to_icm`` for all other paths, which are redirected to the ICM
+  service (HTTP 301).
 
 **Redirect to ICM**
 
@@ -89,11 +90,11 @@ Redirect responses include a ``Server`` header of the form::
 
     SAP Message Server, release <release> (<instance>)
 
-**Robust HTTP parsing**
+**Non-HTTP input**
 
-The handler accepts HTTP/1.0 and HTTP/1.1 requests. Malformed request lines,
-overlong lines, and HTTP versions above 1.9 are rejected and the connection
-is closed.
+Like the Message Server, input that is not an HTTP request (including TLS) is
+not answered; the connection is closed and the input is logged as
+``Non-HTTP input``.
 
 
 Configuration options

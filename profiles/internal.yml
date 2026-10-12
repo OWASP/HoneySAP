@@ -36,6 +36,10 @@ logging:
     connection_events: close
     # Emit "Unparsed input" for data that cannot be decoded or handled
     unparsed_input: true
+    # HTTP services: log all request headers in order
+    http_headers: true
+    # HTTP services: log the request body
+    http_body: true
 
 
 # SAP instance configuration

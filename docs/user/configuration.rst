@@ -142,6 +142,10 @@ events:
      connection_events: close
      # Emit "Unparsed input" when received data cannot be decoded or handled
      unparsed_input: true
+     # HTTP services: log all request headers in order
+     http_headers: true
+     # HTTP services: log the request body
+     http_body: true
 
    services:
      - service: SAPGatewayService
@@ -177,6 +181,39 @@ these events in addition to their protocol events:
     and ``close_reason`` (``client_close``, ``timeout``, ``error``,
     ``server_close`` or ``routed``), so clients that connect without sending
     data are visible too.
+
+
+.. _http-evidence:
+
+The HTTP services (ICM and Message Server HTTP) log one event per request
+(``ICM HTTP request``, ``MS HTTP request``) with ``request`` and ``response``
+holding the exact bytes, and in ``data``: ``method``, ``target``, ``path``,
+``query``, ``http_version``, ``scheme``, ``host``, ``user_agent``,
+``status``, ``headers`` (``[name, value]`` pairs in received order and case,
+``http_headers``), ``body`` (``http_body``, capped by ``max_payload_bytes``)
+and ``multipart`` for multipart bodies. Conflicting framing headers such as
+``Content-Length`` together with ``Transfer-Encoding`` are kept as received.
+They also emit:
+
+``Non-HTTP input``
+    Input that is not an HTTP request. ``data.kind`` is ``tls`` (a TLS
+    ClientHello on a plain port), ``invalid_request_line``,
+    ``plaintext_on_tls_port``, ``incomplete_request`` or
+    ``incomplete_input`` (the connection ended or timed out mid-request).
+    For TLS, ``data.tls`` holds version, SNI, ALPN, ciphers, extensions,
+    supported groups, signature algorithms and the JA3/JA4 fingerprints.
+
+``TLS client hello`` / ``TLS established`` / ``TLS handshake failed``
+    On HTTPS listeners: the parsed ClientHello (as above), then the
+    negotiated version, cipher and ALPN, or the handshake error.
+
+``Unparsed input``
+    Requests with malformed headers or framing (``data.stage`` is
+    ``headers`` or ``body``) or that crashed the service
+    (``handle_request``).
+
+``Connection closed`` counts requests in ``packets_in``. Each connection
+gets its own session with the real client port.
 
 Miscellaneous
 '''''''''''''

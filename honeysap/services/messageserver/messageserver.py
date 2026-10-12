@@ -16,10 +16,9 @@
 #
 
 # Standard imports
+from email.utils import formatdate
 from html import escape
 from socket import timeout
-from socketserver import ThreadingMixIn
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlsplit
 # External imports
 from pysap.SAPMS import (SAPMS, SAPMSPayload, SAPMSPeerPayload,
@@ -29,7 +28,8 @@ from pysap.SAPNI import SAPNIServerThreaded, SAPNIServerHandler, SAPNIClient
 # Custom imports
 from honeysap.core.logger import Loggeable
 from honeysap.core.evidence import EvidenceHandlerMixin
-from honeysap.core.service import BaseTCPService
+from honeysap.core.http import HTTPResponse
+from honeysap.core.service import BaseHTTPService, BaseTCPService
 
 
 class SAPMSClient(SAPNIClient):
@@ -107,128 +107,47 @@ class SAPMSService(BaseTCPService):
     default_port = 3600
 
 
-class SAPMSHTTPServerHandler(Loggeable, BaseHTTPRequestHandler):
+class SAPMSHTTPService(BaseHTTPService):
 
+    default_port = 8100
     default_release = 720
     default_instance = "PRD"
     default_hostname = "sapnw702"
-
-    def __init__(self, request, client_address, server):
-        Loggeable.__init__(self)
-        client_ip, client_port = client_address
-        server_ip, server_port = server.server_address
-        self.session = server.session_manager.get_session("message_server_http",
-                                                          client_ip,
-                                                          client_port,
-                                                          server_ip,
-                                                          server_port)
-        BaseHTTPRequestHandler.__init__(self, request, client_address, server)
-
-    def log_message(self, fmt, *args):
-        """Override log method to use our logging"""
-        self.logger.debug(fmt, *args)
-
-    def parse_request(self):
-        """Override standard parsing to handle versions and not throw an error
-        and instead close the connection"""
-        self.command = None  # set in case of error on the first line
-        self.request_version = version = self.default_request_version
-        self.close_connection = 1
-        requestline = self.raw_requestline
-        requestline = requestline.decode('iso-8859-1').rstrip('\r\n')
-        self.requestline = requestline
-        words = requestline.split()
-        if len(words) == 3:
-            command, path, version = words
-            if version[:5] != 'HTTP/':
-                self.close_connection = 1
-                return False
-            try:
-                base_version_number = version.split('/', 1)[1]
-                version_number = base_version_number.split(".")
-                # RFC 2145 section 3.1 says there can be only one "." and
-                #   - major and minor numbers MUST be treated as
-                #      separate integers;
-                #   - HTTP/2.4 is a lower version than HTTP/2.13, which in
-                #      turn is lower than HTTP/12.3;
-                #   - Leading zeros MUST be ignored by recipients.
-                if len(version_number) != 2:
-                    raise ValueError
-                version_number = int(version_number[0]), int(version_number[1])
-            except (ValueError, IndexError):
-                self.close_connection = 1
-                return False
-            if version_number >= (1, 1) and self.protocol_version >= "HTTP/1.1":
-                self.close_connection = 0
-            if version_number > (1, 9):
-                self.close_connection = 1
-                return False
-        elif not words:
-            return False
-        else:
-            self.close_connection = 1
-            return False
-        self.command, self.path, self.request_version = command, path, version
-
-        # Examine the headers and look for a Connection directive
-        from http.client import parse_headers
-        self.headers = parse_headers(self.rfile)
-
-        conntype = self.headers.get('Connection', "")
-        if conntype.lower() == 'close':
-            self.close_connection = 1
-        elif (conntype.lower() == 'keep-alive' and
-              self.protocol_version >= "HTTP/1.1"):
-            self.close_connection = 0
-        return True
-
-    def handle_one_request(self):
-        """Override standard handling to serve content on any HTTP verb"""
-        try:
-            self.raw_requestline = self.rfile.readline(65537)
-            if len(self.raw_requestline) > 65536:
-                self.requestline = ''
-                self.request_version = ''
-                self.command = ''
-                self.close_connection = 1
-                return
-            if not self.raw_requestline:
-                self.close_connection = 1
-                return
-            if not self.parse_request():
-                # An error code has been sent, just exit
-                return
-            self.do_request()
-            self.wfile.flush()
-        except timeout as e:
-            self.log_error("Request timed out: %r", e)
-            self.close_connection = 1
-            return
+    session_service_name = "message_server_http"
+    request_event_name = "MS HTTP request"
 
     def version_string(self):
         """Build the server version header using the release and instance name"""
-        release = self.server.config.get("release", self.default_release)
-        instance = self.server.config.get("instance", self.default_instance)
+        release = self.config.get("release", self.default_release)
+        instance = self.config.get("instance", self.default_instance)
 
-        return "SAP Message Server, release %d (%s)" % (release,
-                                                        instance)
+        return "SAP Message Server, release %d (%s)" % (int(release), instance)
 
-    def build_301_to_icm(self):
+    def request_details(self, request):
+        if request.path.startswith("/msgserver"):
+            return {"action": "msgserver"}
+        return {"action": "redirect_to_icm"}
+
+    def handle_request(self, request, connection):
+        if request.path.startswith("/msgserver"):
+            self.logger.debug("Received request to msgserver endpoint")
+            return self.msgserver_response(request)
+        self.logger.debug("Redirecting to ICM service")
+        return self.build_301_to_icm(request)
+
+    def msgserver_response(self, request):
+        return HTTPResponse(404, "Not Found", [("Content-Length", "0")], b"",
+                            version=request.version)
+
+    def build_301_to_icm(self, request):
         """Build a redirection to the ICM service"""
-        hostname = self._redirect_hostname()
+        hostname = self._redirect_hostname(request)
         try:
-            icm_configs = self.server.config.config_for("services", "service", "SAPICMService")
+            icm_configs = self.config.config_for("services", "service", "SAPICMService")
             icm_port = icm_configs[0].get("listener_port", 8000)
         except (IndexError, AttributeError):
             icm_port = 8000
-        url = "http://%s:%d%s" % (hostname,
-                                  icm_port,
-                                  self.path)
-
-        try:
-            _, min_version = map(int, self.request_version.split("/", 2)[1].split(".", 2))
-        except (ValueError, IndexError):
-            min_version = 1
+        url = "http://%s:%d%s" % (hostname, icm_port, request.target)
 
         body = """<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
 <HTML><HEAD>
@@ -240,73 +159,35 @@ The document has moved <A HREF="%s"> here</A>
 """ % (escape(url, quote=True))
 
         body_bytes = body.encode("utf-8")
-        self.send_response_only(301, "MOVED PERMANENTLY")
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", len(body_bytes))
-        self.send_header("location", url)
-        self.send_header("date", self.date_time_string())
-        self.send_header("server", self.version_string())
-        if min_version >= 1:
-            self.send_header("connection", "close")
-        self.end_headers()
-        self.wfile.write(body_bytes)
+        headers = [("Content-Type", "text/html; charset=utf-8"),
+                   ("Content-Length", str(len(body_bytes))),
+                   ("location", url),
+                   ("date", formatdate(usegmt=True)),
+                   ("server", self.version_string())]
+        if request.version >= "HTTP/1.1":
+            headers.append(("connection", "close"))
+        return HTTPResponse(301, "MOVED PERMANENTLY", headers, body_bytes,
+                            version=request.version, close=True)
 
-    def _redirect_hostname(self):
+    def _redirect_hostname(self, request):
         """Return the configured ICM redirect hostname.
 
         ``redirect_hostname: request`` preserves the authority the client used
         for the Message Server HTTP request, making a container deployment
         reachable without requiring a fictitious SAP hostname in client DNS.
         """
-        configured = self.server.config.get(
+        configured = self.config.get(
             "redirect_hostname",
-            self.server.config.get("hostname", self.default_hostname))
+            self.config.get("hostname", self.default_hostname))
         if configured != "request":
             return configured
 
         try:
-            hostname = urlsplit("//%s" % self.headers.get("Host", "")).hostname
+            hostname = urlsplit("//%s" % request.header("Host", "")).hostname
         except ValueError:
             hostname = None
         if not hostname:
-            return self.server.config.get("hostname", self.default_hostname)
+            return self.config.get("hostname", self.default_hostname)
         if ":" in hostname:
             return "[%s]" % hostname
         return hostname
-
-    def do_request(self):
-        data = {
-            "client": str(self.client_address),
-            "method": self.command,
-            "path": self.path,
-            "user_agent": self.headers.get("User-Agent", ""),
-            "host": self.headers.get("Host", ""),
-        }
-
-        if self.path.startswith("/msgserver"):
-            self.session.add_event("MS HTTP request to msgserver",
-                                   data=data)
-            self.logger.debug("Received request to msgserver endpoint")
-            self.do_request_msgserver()
-        else:
-            self.session.add_event("MS HTTP request redirected to ICM",
-                                   data=data)
-            self.logger.debug("Redirecting to ICM service")
-            self.build_301_to_icm()
-
-    def do_request_msgserver(self):
-        self.send_response_only(404, "Not Found")
-        self.send_header("Content-Length", "0")
-        self.end_headers()
-
-
-class SAPMSHTTPServerThreaded(ThreadingMixIn, HTTPServer):
-    pass
-
-
-class SAPMSHTTPService(BaseTCPService):
-
-    server_cls = SAPMSHTTPServerThreaded
-    handler_cls = SAPMSHTTPServerHandler
-
-    default_port = 8100
