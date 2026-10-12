@@ -16,39 +16,48 @@
 #
 
 # Standard imports
+import os
+from datetime import datetime, timezone
+from email.utils import formatdate
+from random import getrandbits
 # External imports
 from flask.templating import render_template
 # Custom imports
 from honeysap.core.service import BaseHTTPService
 
 
+TEMPLATES = os.path.join(os.path.dirname(__file__), "templates")
+
+
 class SAPICMService(BaseHTTPService):
 
     default_port = 8000
     default_release = 720
-    template_folder = "honeysap/services/icm/templates"
+    template_folder = TEMPLATES
+    session_service_name = "icm_http"
+    request_event_name = "ICM HTTP request"
 
     def setup_server(self):
+        with open(os.path.join(TEMPLATES, "icm_bad_request.html"), "rb") as f:
+            self.bad_request_page = f.read()
         super(SAPICMService, self).setup_server()
 
-        @self.app.before_request
-        def log_request():
-            from flask import request as flask_request
-            client_ip = flask_request.remote_addr
-            session = self.session_manager.get_session(
-                "icm_http", client_ip, 0,
-                self.listener_address, self.listener_port)
-            data = {
-                "client_ip": client_ip,
-                "method": flask_request.method,
-                "path": flask_request.path,
-                "url": flask_request.url,
-                "user_agent": flask_request.headers.get("User-Agent", ""),
-                "host": flask_request.headers.get("Host", ""),
-            }
-            session.add_event("ICM HTTP request", data=data)
-            self.logger.debug("ICM request from %s: %s %s",
-                              client_ip, flask_request.method, flask_request.path)
+    def non_http_response(self, kind):
+        """The ICM answers input that is not HTTP (including TLS on a plain
+        port) with its generic 400 page over HTTP/1.0 and closes."""
+        now = datetime.now(timezone.utc)
+        body = (self.bad_request_page
+                .replace(b"{{TAG}}", b"{%08x}" % getrandbits(32))
+                .replace(b"{{SERVER_TIME}}", now.strftime("%Y-%m-%d %H:%M:%S").encode())
+                .replace(b"{{YEAR}}", str(now.year).encode()))
+        # The ICM pads the Content-Length value
+        head = ("HTTP/1.0 400 Bad Request\r\n"
+                "date: %s\r\n"
+                "pragma: no-cache\r\n"
+                "connection: close\r\n"
+                "content-length: %-7d\r\n"
+                "content-type: text/html\r\n\r\n" % (formatdate(usegmt=True), len(body)))
+        return head.encode("ascii") + body
 
     def version_string(self):
         release = str(self.config.get("release", self.default_release))
@@ -63,12 +72,6 @@ class SAPICMService(BaseHTTPService):
     route_index.rule = "/"
 
     def error_400(self, code):
-        error = "-21"
-        version = "7200"
-        date_time = "Tue Aug 19 20:21:02 2014"
-        server = "sapnw702_NSP_00"
-        base_url = "http://sapnw702:8000"
-        hostname = "sapnw702"
         return render_template("400.html"), 400
 
     def error_404(self, code):

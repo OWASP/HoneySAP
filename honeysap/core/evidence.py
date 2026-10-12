@@ -39,6 +39,10 @@ class LoggingPolicy(object):
         "connection_events": "close",
         # Emit "Unparsed input" when received data cannot be handled
         "unparsed_input": True,
+        # HTTP services: log all request headers in order
+        "http_headers": True,
+        # HTTP services: log the request body (also part of the raw request)
+        "http_body": True,
     }
 
     def __init__(self, **options):
@@ -48,7 +52,8 @@ class LoggingPolicy(object):
             raise ValueError("Unknown logging option(s): %s" %
                              ", ".join(sorted(unknown)))
         values.update(options)
-        for name in ("raw_payloads", "response_events", "unparsed_input"):
+        for name in ("raw_payloads", "response_events", "unparsed_input",
+                     "http_headers", "http_body"):
             if not isinstance(values[name], bool):
                 raise ValueError("logging.%s must be a boolean" % name)
         limit = values["max_payload_bytes"]
@@ -98,8 +103,10 @@ class WireTap(object):
     def __getattr__(self, name):
         return getattr(self._sock, name)
 
-    def recv(self, *args, **kwargs):
-        data = self._sock.recv(*args, **kwargs)
+    def recv(self, bufsize, flags=0):
+        data = self._sock.recv(bufsize, flags)
+        if flags & socket.MSG_PEEK:
+            return data
         self.rx += data
         self.bytes_in += len(data)
         return data
@@ -138,6 +145,18 @@ def install_tap(stream):
     if getattr(stream, "outs", None) is not None:
         stream.outs = sock
     return sock
+
+
+def connection_closed(session, client_address, started, tap, packets_in,
+                      close_reason):
+    """Emit the "Connection closed" summary event of a connection."""
+    session.add_event("Connection closed", data={
+        "client": str(client_address),
+        "duration_seconds": round(monotonic() - started, 3),
+        "bytes_in": tap.bytes_in if tap else 0,
+        "bytes_out": tap.bytes_out if tap else 0,
+        "packets_in": packets_in,
+        "close_reason": close_reason or "server_close"})
 
 
 def summarize(packet):
@@ -264,12 +283,7 @@ class EvidenceHandlerMixin(object):
         finally:
             self.flush_sent()
             if self.logging_policy.connection_events != "none":
-                started = getattr(self, "connection_started", monotonic())
-                tap = self.tap
-                self.session.add_event("Connection closed", data={
-                    "client": str(self.client_address),
-                    "duration_seconds": round(monotonic() - started, 3),
-                    "bytes_in": tap.bytes_in if tap else 0,
-                    "bytes_out": tap.bytes_out if tap else 0,
-                    "packets_in": getattr(self, "packets_in", 0),
-                    "close_reason": self.close_reason or "server_close"})
+                connection_closed(self.session, self.client_address,
+                                  getattr(self, "connection_started", monotonic()),
+                                  self.tap, getattr(self, "packets_in", 0),
+                                  self.close_reason)

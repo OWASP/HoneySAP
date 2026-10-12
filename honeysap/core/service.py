@@ -26,6 +26,9 @@ from pysap.SAPNI import SAPNIServerThreaded, SAPNIServerHandler
 from .logger import Loggeable
 from .loader import ClassLoader
 from .evidence import LoggingPolicy
+from .http import (HTTPConnectionHandler, HTTPResponse, HTTPServerThreaded,
+                   WSGIBridge)
+from .tls import server_context
 
 
 WORKER_STOP_TIMEOUT = 2
@@ -160,23 +163,36 @@ class BaseTCPService(BaseService):
         self.handler_cls(client, client_address, self.server)
 
 
-class BaseHTTPService(BaseService):
+class BaseHTTPService(BaseTCPService):
+    """Base class for HTTP services.
+
+    Connections are read by the HTTP front end (honeysap.core.http), which
+    logs every request with its raw bytes and hands it to ``handle_request``.
+    By default requests are answered by the service's Flask application,
+    built from its ``route_*`` and ``error_*`` methods."""
+
+    server_cls = HTTPServerThreaded
+    handler_cls = HTTPConnectionHandler
 
     template_folder = None
     application_name = None
+    # Service name recorded in the sessions and name of the request event
+    session_service_name = "http"
+    request_event_name = "HTTP request"
+    default_max_body_bytes = 16 * 1024 * 1024
 
     def setup_server(self):
-        super(BaseHTTPService, self).setup_server()
-
         # Create an Flask application for this service using the service name
         self.app = Flask(self.application_name or self.__class__.__name__,
                          template_folder=self.template_folder or None)
+        self.wsgi = WSGIBridge(self.app)
 
         methods = dir(self)
         # Attach each route in the class
         for name in [x for x in methods if x.startswith("route_")]:
             method = getattr(self, name)
-            self.app.add_url_rule(method.rule, name, method)
+            self.app.add_url_rule(method.rule, name, method,
+                                  methods=getattr(method, "methods", None))
             self.logger.debug("Adding handler '%s' for '%s' rule", name, method.rule)
 
         # Attach error handlers in the class
@@ -186,17 +202,38 @@ class BaseHTTPService(BaseService):
             self.app.register_error_handler(code, method)
             self.logger.debug("Adding handler '%s' for error code '%d'", name, code)
 
-    def run(self):
-        self.logger.debug("Waiting for clients")
-        try:
-            self.app.run(self.listener_address,
-                         self.listener_port)
-        except KeyboardInterrupt:
-            self.logger.warning("Canceled by the user")
-            self.stop()
+        tls = self.config.get("tls") or {}
+        if not isinstance(tls, dict):
+            raise ValueError("tls must be a mapping")
+        self.tls_context = None
+        if tls.get("enabled", False):
+            self.tls_context = server_context(
+                tls, self.config.get("hostname", "localhost"))
+        self.max_body_bytes = self.config.get("max_body_bytes",
+                                              self.default_max_body_bytes)
 
-    def stop(self):
-        self.logger.debug("Stopping server")
+        super(BaseHTTPService, self).setup_server()
+
+    def handle_request(self, request, connection):
+        """Answer a request, returns an HTTPResponse (or None to close)."""
+        return self.wsgi(request, connection)
+
+    def request_details(self, request):
+        """Service-specific fields added to the request event."""
+        return {}
+
+    def non_http_response(self, kind):
+        """Response to input that is not HTTP (bytes, HTTPResponse or None
+        to close the connection without answering)."""
+        return None
+
+    def bad_request_response(self, error):
+        """Response to an HTTP request that could not be parsed."""
+        return self.non_http_response("bad_request")
+
+    def internal_error_response(self, request):
+        return HTTPResponse(500, "Internal Server Error",
+                            [("Content-Length", "0")], b"", close=True)
 
 
 class ServiceManager(Loggeable):

@@ -14,6 +14,21 @@
   opened`/`Connection closed` events; input that fails to decode or crashes a
   handler is now recorded with its raw bytes instead of being dropped
   ([@randomstr1ng](https://github.com/randomstr1ng)).
+- HTTP services (ICM, Message Server HTTP): New HTTP front end reading the
+  raw socket. Requests are logged with exact request/response bytes, all
+  headers in order, body and multipart parts; non-HTTP input and TLS
+  ClientHellos (with JA3/JA4) are logged; one session per connection with the
+  real source port. Optional HTTPS listener (`tls:`) with a generated
+  SAP-style certificate. Non-HTTP input is answered like the ICM (400 page)
+  and Message Server (close). The Message Server HTTP events are now a single
+  `MS HTTP request` event with `action`
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
+
+### Bug fixes
+
+- Virtual HTTP services no longer bind sockets, so `profiles/external.yml`
+  starts without the virtual addresses being local
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
 
 ## v0.2.0 - 2026-10-06
 
