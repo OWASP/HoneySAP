@@ -42,7 +42,7 @@ jobs:
             requirements.txt
             requirements-docs.txt
       - run: sudo apt-get update
-      - run: sudo apt-get install -y pandoc texlive-latex-base ghostscript
+      - run: sudo apt-get install -y graphviz
       - run: uv pip install --system wheel setuptools
       - run: uv pip install --system -r requirements.txt -r requirements-docs.txt
       - run: uv pip install --system -e .
