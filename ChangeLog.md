@@ -2,6 +2,19 @@
 
 ## v0.2.1.dev0 - in dev
 
+### Enhancements and improvements
+
+- `honeysap/core/`: Events carry the raw bytes received and sent on the wire
+  instead of a packet summary, plus a `connection_id` per TCP connection
+  (event schema version 2). New `logging:` options, global and per service,
+  control raw payloads, payload size cap, response and connection events
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
+- SAP NI services (Dispatcher, Gateway, Message Server, SAPRouter): Added
+  `Received packet`, `Sent packet`, `Unparsed input`, and `Connection
+  opened`/`Connection closed` events; input that fails to decode or crashes a
+  handler is now recorded with its raw bytes instead of being dropped
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
+
 ## v0.2.0 - 2026-10-06
 
 ### New features
