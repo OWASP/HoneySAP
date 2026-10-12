@@ -24,6 +24,24 @@
   `MS HTTP request` event with `action`
   ([@randomstr1ng](https://github.com/randomstr1ng)).
 
+- `honeysap/core/persona.py`: New `system:` configuration describing the
+  emulated SAP system; Gateway (`RFC_SYSTEM_INFO`), Dispatcher, ICM and
+  Message Server report the same identity. `RFCMACH`/`RFCTZONE` are
+  right-aligned like on a real system
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
+- ICM: Responses modeled on an ABAP Platform ICM (header names, case and
+  order, error pages, `sap-usercontext` cookie). New ICF service dispatch with
+  `/sap/public/ping`, `/sap/public/info`, `/sap/public/icman/ping`, logoff and
+  ICM admin redirect; `auth` services answer 401 and log submitted Basic
+  credentials (`ICM authentication attempt`). HTTPS mimics the ICM TLS setup
+  (certificate chain, TLS 1.2, cipher order), `mimic_icm` to opt out
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
+- Message Server HTTP: All `/msgserver` commands (application server and
+  logon group lists, logon data versions 1.0-1.3, group details) answered
+  like the Message Server; other paths redirect with 307. Flask is no longer
+  a dependency
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
+
 ### Bug fixes
 
 - Virtual HTTP services no longer bind sockets, so `profiles/external.yml`

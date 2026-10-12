@@ -7,7 +7,6 @@
 #
 
 import unittest
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 from scapy.packet import Raw
@@ -32,7 +31,7 @@ class MessageServerHandlerTest(unittest.TestCase):
         service = self.make_ms_http_service()
         response = service.handle_request(self.make_request("/caf\xe9"), None)
         headers, body = response.to_bytes().split(b"\r\n\r\n", 1)
-        self.assertTrue(headers.startswith(b"HTTP/1.1 301"))
+        self.assertTrue(headers.startswith(b"HTTP/1.1 307 TEMPORARY REDIRECT"))
         self.assertIn(b"location: http://example.invalid:8000/caf\xe9", headers)
         self.assertIn(("Content-Length: %d" % len(body)).encode(), headers)
         self.assertTrue(response.close)
@@ -49,11 +48,47 @@ class MessageServerHandlerTest(unittest.TestCase):
         response = service.handle_request(request, None)
         self.assertIn(("location", "http://honeysap.example:8000/"), response.headers)
 
+    def test_message_server_paths_are_case_sensitive(self):
+        service = self.make_ms_http_service()
+        response = service.handle_request(self.make_request("/MSGSERVER/TEXT/LOGON"), None)
+        self.assertEqual(response.status, 307)
+
+    def test_text_logon(self):
+        service = self.make_ms_http_service(
+            hostname="vhcala4hci", system={"sid": "A4H"},
+            services=[{"service": "SAPICMService", "listener_port": 50000},
+                      {"service": "SAPICMService", "listener_port": 50001,
+                       "tls": {"enabled": True}}])
+        request = self.make_request("/msgserver/text/logon?version=1.2",
+                                    [("Host", "x:1")])
+        response = service.handle_request(request, None)
+        self.assertEqual(response.body,
+                         b"version 1.2\nvhcala4hci_A4H_00\n"
+                         b"DIAG\tvhcala4hci\t3200\tLB=7\nRFC\tvhcala4hci\t3300\t\n"
+                         b"HTTP\tvhcala4hci\t50000\t\nHTTPS\tvhcala4hci\t50001\t\n"
+                         b"HTTP\tvhcala4hci\t50000\tVHOST=0\nHTTPS\tvhcala4hci\t50001\tVHOST=0\n\n")
+        self.assertEqual([name for name, _ in response.headers],
+                         ["Content-Type", "Content-Length", "location", "host", "date",
+                          "server", "connection"])
+        self.assertIn(("host", "x:1"), response.headers)
+        self.assertIn(("server", "SAP Message Server, release 916 (A4H)"), response.headers)
+
+    def test_group_without_query_is_a_kernel_error(self):
+        service = self.make_ms_http_service()
+        response = service.handle_request(self.make_request("/msgserver/text/group"), None)
+        self.assertEqual((response.status, response.version), (400, "HTTP/1.0"))
+        self.assertIn(b"required field ~query_string not found", response.body)
+        response = service.handle_request(self.make_request("/msgserver/text/group?SPACE&NOPE"),
+                                          None)
+        self.assertIn(b"detailed informations for logon group SPACE", response.body)
+        self.assertIn(b"specified group not found", response.body)
+
     def test_message_server_endpoint_returns_a_response(self):
         service = self.make_ms_http_service()
         request = self.make_request("/msgserver")
         response = service.handle_request(request, None)
-        self.assertEqual(response.status, 404)
+        self.assertEqual(response.status, 200)
+        self.assertIn(b"List of commands", response.body)
         self.assertEqual(service.request_details(request), {"action": "msgserver"})
 
     def test_message_server_rejects_non_ms_payload(self):

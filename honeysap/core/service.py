@@ -18,7 +18,6 @@
 # Standard imports
 from abc import abstractmethod, ABCMeta
 # External imports
-from flask.app import Flask
 from gevent.event import Event
 from gevent import getcurrent, spawn, joinall
 from pysap.SAPNI import SAPNIServerThreaded, SAPNIServerHandler
@@ -26,8 +25,8 @@ from pysap.SAPNI import SAPNIServerThreaded, SAPNIServerHandler
 from .logger import Loggeable
 from .loader import ClassLoader
 from .evidence import LoggingPolicy
-from .http import (HTTPConnectionHandler, HTTPResponse, HTTPServerThreaded,
-                   WSGIBridge)
+from .http import HTTPConnectionHandler, HTTPResponse, HTTPServerThreaded
+from .persona import SystemPersona
 from .tls import server_context
 
 
@@ -69,6 +68,7 @@ class BaseService(Loggeable, metaclass=ABCMeta):
         self.session_manager = session_manager
         self.service_manager = service_manager
         self.logging_policy = LoggingPolicy.from_config(config)
+        self.persona = SystemPersona.from_config(config)
 
         # If a custom alias was defined, use that as a logger name, otherwise
         # use the default (class name)
@@ -121,6 +121,7 @@ class BaseTCPService(BaseService):
         self.server.session_manager = self.session_manager
         self.server.service_manager = self.service_manager
         self.server.logging_policy = self.logging_policy
+        self.server.persona = self.persona
 
         # Only bind and activate the server if not virtual, in that case
         # we would be passing the client's socket from other service. This
@@ -167,48 +168,24 @@ class BaseHTTPService(BaseTCPService):
     """Base class for HTTP services.
 
     Connections are read by the HTTP front end (honeysap.core.http), which
-    logs every request with its raw bytes and hands it to ``handle_request``.
-    By default requests are answered by the service's Flask application,
-    built from its ``route_*`` and ``error_*`` methods."""
+    logs every request with its raw bytes and hands it to ``handle_request``
+    of the service."""
 
     server_cls = HTTPServerThreaded
     handler_cls = HTTPConnectionHandler
 
-    template_folder = None
-    application_name = None
     # Service name recorded in the sessions and name of the request event
     session_service_name = "http"
     request_event_name = "HTTP request"
     default_max_body_bytes = 16 * 1024 * 1024
 
     def setup_server(self):
-        # Create an Flask application for this service using the service name
-        self.app = Flask(self.application_name or self.__class__.__name__,
-                         template_folder=self.template_folder or None)
-        self.wsgi = WSGIBridge(self.app)
-
-        methods = dir(self)
-        # Attach each route in the class
-        for name in [x for x in methods if x.startswith("route_")]:
-            method = getattr(self, name)
-            self.app.add_url_rule(method.rule, name, method,
-                                  methods=getattr(method, "methods", None))
-            self.logger.debug("Adding handler '%s' for '%s' rule", name, method.rule)
-
-        # Attach error handlers in the class
-        for name in [x for x in methods if x.startswith("error_")]:
-            method = getattr(self, name)
-            code = int(name.split("_", 2)[1])
-            self.app.register_error_handler(code, method)
-            self.logger.debug("Adding handler '%s' for error code '%d'", name, code)
-
         tls = self.config.get("tls") or {}
         if not isinstance(tls, dict):
             raise ValueError("tls must be a mapping")
         self.tls_context = None
         if tls.get("enabled", False):
-            self.tls_context = server_context(
-                tls, self.config.get("hostname", "localhost"))
+            self.tls_context = server_context(tls, self.persona.hostname)
         self.max_body_bytes = self.config.get("max_body_bytes",
                                               self.default_max_body_bytes)
 
@@ -216,7 +193,7 @@ class BaseHTTPService(BaseTCPService):
 
     def handle_request(self, request, connection):
         """Answer a request, returns an HTTPResponse (or None to close)."""
-        return self.wsgi(request, connection)
+        return HTTPResponse(404, "Not Found", [("Content-Length", "0")], b"")
 
     def request_details(self, request):
         """Service-specific fields added to the request event."""

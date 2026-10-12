@@ -52,15 +52,15 @@ class SAPDispatcherServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHan
 
     @property
     def hostname(self):
-        return self.config.get("hostname", "sapnw702")
+        return self.server.persona.hostname
 
     @property
     def client_no(self):
-        return self.config.get("client_no", "001")
+        return self.server.persona.client
 
     @property
     def sid(self):
-        return self.config.get("sid", "PRD")
+        return self.server.persona.sid
 
     @property
     def session_title(self):
