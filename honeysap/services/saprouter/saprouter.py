@@ -194,7 +194,7 @@ class SAPRouterServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandler
         # must also treat it as a normal routed-client disconnect.
         except (OSError, EOFError):
             self.logger.debug("Client %s disconnected", self.client_address)
-            if self.close_reason in (None, "routed"):
+            if self.close_reason is None:
                 self.close_reason = "client_close"
 
         except Timeout as t:
