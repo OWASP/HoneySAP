@@ -115,6 +115,7 @@ errors:
     return_code: -94
     error: "$hostname: route permission denied ($peer_ip to $target_host, $target_port)"
     detail: ""
+    module: ""
     count_step: 1
   partner_unreachable:
     return_code: -92
