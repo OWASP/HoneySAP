@@ -16,6 +16,7 @@
 #
 
 # Standard imports
+import json
 import sys
 import logging
 # External imports
@@ -57,6 +58,10 @@ class ConsoleFeed(BaseFeed):
     def log(self, event):
         """Logs an event in the log file"""
         self.feed_logger.log(self.EVENT, repr(event))
+
+    def log_metrics(self, metrics):
+        """Logs a Metrics record next to the events"""
+        self.feed_logger.info("Metrics %s", json.dumps(metrics, sort_keys=True))
 
     def consume(self, queue):
         raise NotImplementedError("Console feed cannot be consumed")

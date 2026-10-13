@@ -28,7 +28,7 @@ from gevent.timeout import Timeout
 
 from pysap.SAPNI import (SAPNI, SAPNIStreamSocket, SAPNIServerThreaded,
                          SAPNIServerHandler, SAPNIClient)
-from pysap.SAPRouter import (SAPRouter, SAPRouterError, SAPRouterInfoClient,
+from pysap.SAPRouter import (SAPRouter, SAPRouterError, SAPRouterInfoClient, SAPRouterRouteHop,
                              ROUTER_TALK_MODE_NI_MSG_IO,
                              router_is_control, router_is_admin,
                              router_is_known_type, router_control_opcodes,
@@ -41,6 +41,43 @@ from honeysap.core.service import BaseTCPService
 
 from .routetable import RouteTable
 from .error_profiles import (resolve_error_profile, render_error_options)
+
+
+def _text(value):
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace").strip("\x00")
+    return "" if value is None else str(value)
+
+
+def route_details(pkt):
+    """Route string, hops (host, port, password) and route header fields of a
+    route request"""
+    hops = [{"host": _text(hop.hostname), "port": _text(hop.port),
+             "password": _text(hop.password)} for hop in (pkt.route_string or [])]
+    try:
+        route = SAPRouterRouteHop.from_hops(pkt.route_string or [])
+    except Exception:
+        route = "".join("/H/%(host)s/S/%(port)s" % hop + ("/W/%s" % hop["password"]
+                                                          if hop["password"] else "")
+                        for hop in hops)
+    if isinstance(route, bytes):
+        route = _text(route)
+    return {"route": route, "hops": hops, "talk_mode": pkt.route_talk_mode,
+            "ni_version": pkt.route_ni_version, "rest_nodes": pkt.route_rest_nodes,
+            "entries": pkt.route_entries}
+
+
+def admin_details(pkt):
+    """Command name and code and the arguments of an admin request"""
+    details = {"admin_command": {"code": pkt.adm_command,
+                                 "name": router_adm_commands.get(pkt.adm_command, "unknown")}}
+    if pkt.adm_command == 2:
+        details["password"] = _text(pkt.adm_password)
+    if pkt.adm_command in (6, 12, 13):
+        details["client_ids"] = list(pkt.adm_client_ids or [])
+    if pkt.adm_command in (10, 11):
+        details["address_mask"] = _text(pkt.adm_address_mask)
+    return details
 
 
 def saprouter_time(dt):
@@ -266,6 +303,8 @@ class SAPRouterServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandler
     def handle_route(self, pkt):
         """Handles route messages"""
         self.logger.debug("Handling route message")
+        self.route = route_details(pkt)
+        self.session.add_event("Route request", data=dict(self.route), request=self.raw_request)
         # Perform some checks on the route request
         if self.check_route(pkt):
             # Route the request
@@ -349,17 +388,17 @@ class SAPRouterServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandler
                 if password == route_password:
                     self.logger.debug("Valid password for route to %s:%s" % (route_string.hostname,
                                                                              route_string.port))
-                    self.session.add_event("Route request allowed, valid password", data={"target_host": route_string.hostname,
-                                                                                          "target_port": route_string.port,
-                                                                                          "password": route_string.password},
+                    self.session.add_event("Route request allowed, valid password",
+                                           data=self.route_event(target_host, target_port,
+                                                                       route_password),
                                            request=self.raw_request)
 
                 else:
                     self.logger.debug("Invalid password for route to %s:%s" % (route_string.hostname,
                                                                                route_string.port))
-                    self.session.add_event("Route request allowed, invalid password", data={"target_host": route_string.hostname,
-                                                                                            "target_port": route_string.port,
-                                                                                            "password": route_string.password},
+                    self.session.add_event("Route request allowed, invalid password",
+                                           data=self.route_event(target_host, target_port,
+                                                                       route_password),
                                            request=self.raw_request)
                     self.deny_route(target_host, target_port)
                     return
@@ -367,9 +406,9 @@ class SAPRouterServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandler
             else:
                 self.logger.debug("Route request allowed to %s:%s" % (route_string.hostname,
                                                                       route_string.port))
-                self.session.add_event("Route request allowed", data={"target": route_string.hostname,
-                                                                      "port": route_string.port,
-                                                                      "password": route_string.password},
+                self.session.add_event("Route request allowed",
+                                       data=self.route_event(target_host, target_port,
+                                                                   route_password),
                                        request=self.raw_request)
 
         # The route is accepted, now look the service for the target address/port
@@ -383,9 +422,9 @@ class SAPRouterServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandler
         if service is None:
             self.logger.debug("Target service %s:%s not available", target_host,
                               target_port)
-            self.session.add_event("Target service not available", data={"target": target_host,
-                                                                         "port": target_port,
-                                                                         "password": route_password},
+            self.session.add_event("Target service not available",
+                                   data=self.route_event(target_host, target_port,
+                                                               route_password),
                                    request=self.raw_request)
             if pkt.route_talk_mode == RouteTable.MODE_RAW:
                 # The configured raw route behavior acknowledges the route,
@@ -422,6 +461,11 @@ class SAPRouterServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandler
             self.advance_profile_count("route_accept_step")
             self.request.send(SAPRouter(type=SAPRouter.SAPROUTER_PONG))
 
+    def route_event(self, target_host, target_port, password):
+        """Event data of a route decision: the target and the whole route"""
+        return dict(getattr(self, "route", None) or {}, target_host=target_host,
+                    target_port=target_port, password=password)
+
     def deny_route(self, target_host, target_port):
         """Reply with a route-permission error for a denied destination."""
         self.emit_profile_error("route_denied", target_host=target_host,
@@ -451,6 +495,8 @@ class SAPRouterServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandler
         command_name = router_adm_commands.get(pkt.adm_command, "unknown")
         self.logger.debug("Handling admin message, command %d (%s)",
                           pkt.adm_command, command_name)
+        details = admin_details(pkt)
+        self.session.add_event("Admin request", data=details, request=self.raw_request)
 
         if not self.external_admin:
             self.logger.debug("External administration disabled")
@@ -464,10 +510,10 @@ class SAPRouterServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandler
 
             # If a password was specified but doesn't match, return error
             if self.info_password and self.info_password != pkt.adm_password.strip(b"\x00").decode():
-                self.session.add_event("Information request invalid password", data=pkt.adm_password, request=self.raw_request)
+                self.session.add_event("Information request invalid password", data=details, request=self.raw_request)
                 return self.emit_profile_error("admin_password_denied")
             else:
-                self.session.add_event("Information request valid password", data=pkt.adm_password, request=self.raw_request)
+                self.session.add_event("Information request valid password", data=details, request=self.raw_request)
                 return self.return_info()
 
         # Trace connection request

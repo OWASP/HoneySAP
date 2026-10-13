@@ -4,6 +4,24 @@
 
 ### Enhancements and improvements
 
+- Gateway: Import parameters of infrastructure RFC calls are logged too
+  (`FUNCNAME` of `RFC_GET_FUNCTION_INTERFACE`, `TABNAME` of
+  `DDIF_FIELDINFO_GET`); `target_function`, `conversation_id` and the
+  `/SLOAE/DEPLOY` payload are in their events instead of being attached late
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
+- Dispatcher: Every DIAG request is logged with its OK code, transaction, UI
+  events, named input fields and item names; login requests carry `client`,
+  `user`, `password` and `language`
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
+- SAPRouter: New `Route request` event with the full route string and all
+  hops; new `Admin request` event with the command name and code and its
+  arguments ([@randomstr1ng](https://github.com/randomstr1ng)).
+- LogFeed: The log file is re-opened after external rotation; optional
+  rotation by size (`max_bytes`) or time (`rotate_when`)
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
+- New `metrics:` option: periodic `Metrics` records with the event pipeline
+  counters in the log feeds, and an optional Prometheus `/metrics` endpoint
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
 - `honeysap/core/`: Events carry the raw bytes received and sent on the wire
   instead of a packet summary, plus a `connection_id` per TCP connection
   (event schema version 2). New `logging:` options, global and per service,

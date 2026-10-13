@@ -16,8 +16,11 @@
 #
 
 # Standard imports
+import json
 import os
 import logging
+from logging.handlers import (RotatingFileHandler, TimedRotatingFileHandler,
+                              WatchedFileHandler)
 # External imports
 # Custom imports
 from honeysap.core.feed import BaseFeed
@@ -34,6 +37,27 @@ class LogFeed(BaseFeed):
     def log_filename(self):
         return self.config.get("log_filename", "honeysap.log")
 
+    def file_handler(self):
+        """Handler for the log file. By default the file is re-opened when
+        an external tool (logrotate) renames it; max_bytes or rotate_when
+        rotate it here, keeping backup_count files."""
+        max_bytes = self.config.get("max_bytes", 0)
+        rotate_when = self.config.get("rotate_when")
+        backup_count = self.config.get("backup_count", 5)
+        if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes < 0:
+            raise ValueError("max_bytes must be a non-negative integer")
+        if not isinstance(backup_count, int) or isinstance(backup_count, bool) or backup_count < 0:
+            raise ValueError("backup_count must be a non-negative integer")
+        if max_bytes and rotate_when:
+            raise ValueError("max_bytes and rotate_when cannot be combined")
+        if max_bytes:
+            return RotatingFileHandler(self.log_filename, maxBytes=max_bytes,
+                                       backupCount=backup_count)
+        if rotate_when:
+            return TimedRotatingFileHandler(self.log_filename, when=rotate_when,
+                                            backupCount=backup_count, utc=True)
+        return WatchedFileHandler(self.log_filename)
+
     def setup(self):
         """Initializes the log file"""
         logging.addLevelName(self.EVENT, "EVENT")
@@ -42,7 +66,7 @@ class LogFeed(BaseFeed):
         if log_dir:
             os.makedirs(log_dir, exist_ok=True)
 
-        self.logfile_handler = logging.FileHandler(self.log_filename)
+        self.logfile_handler = self.file_handler()
         self.logfile_handler.setFormatter(default_formatter)
 
         self.feed_logger = logging.getLogger("honeysap.events.logfeed")
@@ -62,6 +86,10 @@ class LogFeed(BaseFeed):
     def log(self, event):
         """Logs an event in the log file"""
         self.feed_logger.log(self.EVENT, repr(event))
+
+    def log_metrics(self, metrics):
+        """Logs a Metrics record next to the events"""
+        self.feed_logger.info("Metrics %s", json.dumps(metrics, sort_keys=True))
 
     def consume(self, queue):
         raise NotImplementedError("Log feed cannot be consumed")

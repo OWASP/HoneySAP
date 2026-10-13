@@ -126,9 +126,10 @@ _DANGEROUS_MONITOR_CMDS = frozenset({
 
 # SDK-internal function modules — logged at INFO level (infrastructure noise).
 # Everything else is a business call and gets highlighted at WARNING level.
+# Parameters are logged for all function modules.
 _INFRA_FUNCS = frozenset({
     "RFC_GET_FUNCTION_INTERFACE", "RFC_SYSTEM_INFO",
-    "DDIF_FIELDINFO_GET", "RFC_PING",
+    "DDIF_FIELDINFO_GET", "RFC_PING", "RFCPING", "RFC_GET_STRUCTURE_DEFINITION",
 })
 
 
@@ -1509,8 +1510,6 @@ class SAPGatewayServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandle
                          user_display,
                          data.get("short_dest_name", "N/A"),
                          data.get("long_lu", "N/A"))
-        self.session.add_event("APPC init conversation", data=data)
-
         # Respond: first 80 bytes of the request with conv_id filled in.
         # The real server sends 48-byte APPC header + 32-byte SAPRFCEXTEND
         # (short_dest_name, ncpic_lu, ncpic_tp, flags, code_page_tail).
@@ -1519,6 +1518,7 @@ class SAPGatewayServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandle
             self.server.clients[self.client_address].conversation_id = conv_id
 
         data["conversation_id"] = conv_id
+        self.session.add_event("APPC init conversation", data=data)
 
         try:
             if len(raw) >= 80:
@@ -1675,12 +1675,23 @@ class SAPGatewayServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandle
             cli_display = (client.client_nbr if client else None) or "N/A"
             func_display = data.get("function_module", "unknown")
 
+            # Import parameters and XML encoded tables and structures of
+            # every call; metadata calls name what an attacker plans to call
+            params = extract_rfc_params(raw)
+            if params:
+                data["parameters"] = params
+            xml_data = extract_xml_data(raw)
+            if xml_data:
+                data["xml_data"] = xml_data
+            target = None
+            if func_module == "RFC_GET_FUNCTION_INTERFACE":
+                target = self._extract_target_function(raw) or (params or {}).get("FUNCNAME")
+                if target:
+                    data["target_function"] = target
+            param_str = " ".join("%s=%r" % (k, v) for k, v in params.items()) if params else ""
+
             if func_module not in _INFRA_FUNCS:
-                # Business FM call — extract import parameters and highlight
-                params = extract_rfc_params(raw)
-                if params:
-                    data["parameters"] = params
-                param_str = " ".join("%s=%r" % (k, v) for k, v in params.items()) if params else ""
+                # Business FM call — highlight
                 self.logger.warning(
                     ">>> RFC CALL: %s  (user=%s, client=%s, src=%s)%s",
                     func_display, user_display, cli_display,
@@ -1688,49 +1699,43 @@ class SAPGatewayServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandle
                     ("  [" + param_str + "]") if param_str else "",
                 )
                 # Log XML-encoded extended data (tables and structures).
-                xml_data = extract_xml_data(raw)
-                if xml_data:
-                    data["xml_data"] = xml_data
-                    for tag, val in xml_data.items():
-                        if isinstance(val, list):
-                            self.logger.warning("    %s: (%d row(s))", tag, len(val))
-                            for i, row in enumerate(val, 1):
-                                if isinstance(row, dict):
-                                    for fname, fval in row.items():
-                                        if isinstance(fval, list):
+                for tag, val in (xml_data or {}).items():
+                    if isinstance(val, list):
+                        self.logger.warning("    %s: (%d row(s))", tag, len(val))
+                        for i, row in enumerate(val, 1):
+                            if isinstance(row, dict):
+                                for fname, fval in row.items():
+                                    if isinstance(fval, list):
+                                        self.logger.warning(
+                                            "      [%d] %s: (%d line(s))",
+                                            i, fname, len(fval))
+                                        for j, line in enumerate(fval, 1):
                                             self.logger.warning(
-                                                "      [%d] %s: (%d line(s))",
-                                                i, fname, len(fval))
-                                            for j, line in enumerate(fval, 1):
-                                                self.logger.warning(
-                                                    "        [%3d] %s", j, line)
-                                        else:
-                                            self.logger.warning(
-                                                "      [%d] %s: %s", i, fname, fval)
-                                else:
-                                    self.logger.warning("      [%d] %s", i, row)
-                        else:
-                            self.logger.warning("    %s: %s", tag, val)
+                                                "        [%3d] %s", j, line)
+                                    else:
+                                        self.logger.warning(
+                                            "      [%d] %s: %s", i, fname, fval)
+                            else:
+                                self.logger.warning("      [%d] %s", i, row)
+                    else:
+                        self.logger.warning("    %s: %s", tag, val)
             else:
-                self.logger.info("RFC call from %s: %s (user=%s, client=%s)",
+                self.logger.info("RFC call from %s: %s (user=%s, client=%s)%s",
                                  str(self.client_address), func_display,
-                                 user_display, cli_display)
+                                 user_display, cli_display,
+                                 ("  [" + param_str + "]") if param_str else "")
+            if func_module == "/SLOAE/DEPLOY":
+                self._log_sloae_deploy(raw, data)
             self.session.add_event("RFC function call", data=data)
 
             # Dispatch based on function module name
             try:
                 if func_module == "RFC_GET_FUNCTION_INTERFACE":
-                    target = self._extract_target_function(raw)
-                    if target:
-                        data["target_function"] = target
                     self._send_rfcgfi_response(raw, target)
                 elif func_module == "RFC_SYSTEM_INFO":
                     self._send_sysinfo_response(raw)
                 elif func_module == "DDIF_FIELDINFO_GET":
                     self._send_ddif_response(raw)
-                elif func_module == "/SLOAE/DEPLOY":
-                    self._log_sloae_deploy(raw, data)
-                    self._send_rfc_response(raw)
                 else:
                     self._send_rfc_response(raw)
             except error:
