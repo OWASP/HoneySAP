@@ -255,6 +255,28 @@ Name of the route table file.
 Working directory of the route table file.
 
 
+Events
+------
+
+``Route request``
+    Every route request, with the full route string (``route``, e.g.
+    ``/H/10.0.0.5/S/3299/W/pass/H/10.0.0.100/S/3200``), its ``hops``
+    (``host``, ``port``, ``password``), ``talk_mode``, ``ni_version``,
+    ``rest_nodes`` and ``entries``. The events of the route decision
+    (``Route request allowed``, ``Route request allowed, valid password``,
+    ``Route request allowed, invalid password``, ``Target service not
+    available``) repeat the route and add ``target_host``, ``target_port``
+    and ``password``.
+
+``Admin request``
+    Every administration request, with ``admin_command`` (``code`` and
+    ``name``, e.g. ``Stop Request``, ``Soft Shutdown Request``, ``Cancel Route
+    Request``) and its arguments: ``password`` of information requests,
+    ``client_ids`` of cancel and trace requests and ``address_mask`` of trace
+    peer requests. ``Information request valid password`` and ``Information
+    request invalid password`` carry the same data.
+
+
 Example configuration
 ---------------------
 

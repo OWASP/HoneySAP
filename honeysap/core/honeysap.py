@@ -20,6 +20,7 @@ import sys
 from optparse import OptionGroup
 # Custom imports
 from .feed import FeedManager
+from .metrics import MetricsReporter
 from .session import SessionManager
 from .service import ServiceManager
 from .datastore import DataStoreManager
@@ -101,6 +102,7 @@ class HoneySAP(Loggeable):
         self.logger.info("Setting up feeds")
         self.feed_manager = FeedManager(self.config, self.session_manager)
         self.feed_manager.load_feeds()
+        self.metrics_reporter = MetricsReporter(self.config, self.feed_manager)
 
     def setup_services(self):
         """Setup and instance all configured services."""
@@ -114,6 +116,8 @@ class HoneySAP(Loggeable):
         self.logger.info("Starting feed manager")
         try:
             self.feed_manager.run()
+            if hasattr(self, "metrics_reporter"):
+                self.metrics_reporter.start()
             self.logger.info("Starting services")
             self.service_manager.run()
         except KeyboardInterrupt:
@@ -124,6 +128,8 @@ class HoneySAP(Loggeable):
     def stop(self):
         """Stop all running services and feeds"""
         try:
+            if hasattr(self, "metrics_reporter"):
+                self.metrics_reporter.stop()
             self.feed_manager.stop()
         finally:
             try:

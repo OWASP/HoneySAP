@@ -58,6 +58,11 @@ class BaseFeed(Loggeable, metaclass=ABCMeta):
         """Log an event in the attack session feed"""
         pass
 
+    def log_metrics(self, metrics):
+        """Record the internal counters; feeds holding only events ignore
+        them"""
+        pass
+
     @abstractmethod
     def consume(self, queue):
         """Consume events from the attack session feed"""

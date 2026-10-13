@@ -16,6 +16,7 @@
 #
 
 # Standard imports
+import re
 import string
 from socket import error
 from binascii import unhexlify
@@ -23,18 +24,98 @@ from random import SystemRandom
 # External imports
 from scapy.packet import bind_layers
 
-from pysap.SAPDiag import (SAPDiag, SAPDiagDP, SAPDiagItem)
+from pysap.SAPDiag import (SAPDiag, SAPDiagDP, SAPDiagItem, diag_item_types, diag_appl_ids,
+                           diag_appl_sids)
 from pysap.SAPNI import (SAPNIServerThreaded, SAPNIServerHandler, SAPNIClient)
 from pysap.SAPNWRFC import decode_value
 from pysap.SAPEPP import SAPEPP
 from pysap.SAPDiagItems import (support_data_sapnw_702, SAPDiagAreaSize,
                                 SAPDiagMenuEntries, SAPDiagMenuEntry,
                                 SAPDiagDyntAtom, SAPDiagDyntAtomItem,
-                                SAPDiagStep, SAPDiagSES)
+                                SAPDiagStep, SAPDiagSES, diag_ui_event_type_values,
+                                diag_ui_event_control_values)
 # Custom imports
 from honeysap.core.logger import Loggeable
 from honeysap.core.evidence import EvidenceHandlerMixin
 from honeysap.core.service import BaseTCPService
+
+
+# Dynpro atom types of input fields
+INPUT_ETYPES = (121, 122, 123, 130, 131, 132)
+FIELD_NAME_ETYPE = 114
+# Input fields of the login screen by (block, row, column), and the event
+# keys of their values
+LOGIN_FIELDS = {(1, 0, 20): "RSYST-MANDT", (1, 2, 20): "RSYST-BNAME",
+                (1, 3, 20): "RSYST-BCODE", (1, 5, 20): "RSYST-LANGU"}
+LOGIN_KEYS = {"RSYST-MANDT": "client", "RSYST-BNAME": "user", "RSYST-BCODE": "password",
+              "RSYST-LANGU": "language"}
+# OK codes starting a transaction: /n, /o and /*
+TRANSACTION = re.compile(r"^/[nNoO*](\S+)")
+
+
+def _text(value):
+    if isinstance(value, bytes):
+        value = decode_value(value)
+    return str(value or "").strip("\x00 ")
+
+
+def _item_name(item):
+    """TYPE/ID/SID name of a DIAG item"""
+    item_type = diag_item_types.get(item.item_type, "%#04x" % item.item_type)
+    if item_type not in ("APPL", "APPL4"):
+        return item_type
+    item_id = diag_appl_ids.get(item.item_id, "%#04x" % item.item_id)
+    item_sid = diag_appl_sids.get(item.item_id, {}).get(item.item_sid, "%#04x" % item.item_sid)
+    return "%s/%s/%s" % (item_type, item_id, item_sid)
+
+
+def diag_request(diag):
+    """What a DIAG request carries: OK code (and transaction), UI events,
+    input fields with their names, and the names of all items"""
+    data = {}
+    for item in diag.get_item("APPL", "VARINFO", "OKCODE"):
+        okcode = _text(item.item_value)
+        if okcode:
+            data["okcode"] = okcode
+            transaction = TRANSACTION.match(okcode)
+            if transaction:
+                data["transaction"] = transaction.group(1).upper()
+    events = []
+    for item in diag.get_item("APPL", "UI_EVENT", "UI_EVENT_SOURCE"):
+        source = item.item_value
+        if not hasattr(source, "event_type"):
+            continue
+        event = {"type": diag_ui_event_type_values.get(source.event_type, source.event_type),
+                 "control": diag_ui_event_control_values.get(source.control_type,
+                                                             source.control_type),
+                 "data": source.event_data}
+        if source.valid_menu_pos:
+            event["menu"] = True
+        if source.valid_control_pos:
+            event["position"] = [source.control_row, source.control_col]
+        events.append(event)
+    if events:
+        data["events"] = events
+    atoms = [atom for item in diag.get_item(["APPL", "APPL4"], "DYNT", "DYNT_ATOM")
+             if hasattr(item.item_value, "items") for atom in item.item_value.items]
+    names = {(atom.block, atom.row, atom.col): _text(atom.name_text) for atom in atoms
+             if atom.etype == FIELD_NAME_ETYPE and atom.name_text}
+    fields = []
+    for atom in atoms:
+        if atom.etype not in INPUT_ETYPES or atom.attr_DIAG_BSD_PROTECTED:
+            continue
+        position = (atom.block, atom.row, atom.col)
+        field = {"name": names.get(position) or LOGIN_FIELDS.get(position, ""),
+                 "text": _text(atom.field1_text or atom.field2_text),
+                 "row": atom.row, "col": atom.col}
+        if atom.attr_DIAG_BSD_INVISIBLE:
+            field["invisible"] = True
+        fields.append(field)
+    if fields:
+        data["fields"] = fields
+    data["items"] = sorted({_item_name(item) for item in diag.message
+                            if hasattr(item, "item_type")})
+    return data
 
 
 bind_layers(SAPDiagDP, SAPDiag,)
@@ -132,79 +213,54 @@ class SAPDispatcherServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHan
             self.logoff()
             return
 
-        # Handle exit transaction (OK CODE = /i)
-        okcode_items = diag.get_item("APPL", "VARINFO", "OKCODE")
-        if okcode_items:
-            okcode = okcode_items[0].item_value
-            if isinstance(okcode, bytes):
-                okcode = decode_value(okcode)
-            else:
-                okcode = str(okcode).strip("\x00 ")
-            if okcode == "/i":
-                self.logger.debug("Windows closed by the client %s" % str(self.client_address))
-                self.session.add_event("Windows closed by the client")
+        request = diag_request(diag)
+
+        # Exit transaction (OK code /i)
+        if request.get("okcode") == "/i":
+            self.logger.debug("Windows closed by the client %s" % str(self.client_address))
+            self.session.add_event("Windows closed by the client", data=request)
+            self.logoff()
+            return
+
+        # One event per request, named after the login fields or the UI event
+        name = "Request sent the client"
+        for item in diag.get_item("APPL", "UI_EVENT", "UI_EVENT_SOURCE"):
+            ui_event_source = item.item_value
+            if not hasattr(ui_event_source, "event_type"):
+                continue
+            function_key = ui_event_source.valid_functionkey_data and \
+                ui_event_source.event_type == 7 and ui_event_source.control_type == 10
+            if function_key and ui_event_source.event_data == 15:
+                self.logger.debug("Logoff sent by the client %s" % str(self.client_address))
+                self.session.add_event("Logoff sent the client", data=request)
                 self.logoff()
                 return
-
-        # Handle events (UI EVENT SOURCE)
-        elif len(diag.get_item("APPL", "UI_EVENT", "UI_EVENT_SOURCE")) > 0:
-            self.logger.debug("UI Event sent by the client %s" % str(self.client_address))
-            ui_event_source = diag.get_item("APPL", "UI_EVENT", "UI_EVENT_SOURCE")[0].item_value
-
-            # Handle function key
-            if ui_event_source.valid_functionkey_data:
-                # Handle logoff event
-                if ui_event_source.event_type == 7 and ui_event_source.control_type == 10 and ui_event_source.event_data == 15:
-                    self.logger.debug("Logoff sent by the client %s" % str(self.client_address))
-                    self.session.add_event("Logoff sent the client")
-                    self.logoff()
-
-                # Handle enter event
-                elif ui_event_source.event_type == 7 and ui_event_source.control_type == 10 and ui_event_source.event_data == 0:
-                    self.logger.debug("Enter sent by the client %s" % str(self.client_address))
-                    self.session.add_event("Enter sent the client")
-
-            # Handle menu option
+            if function_key and ui_event_source.event_data == 0:
+                name = "Enter sent the client"
             elif ui_event_source.valid_menu_pos:
-                self.logger.debug("Menu event sent by the client %s" % str(self.client_address))
-                self.session.add_event("Menu event sent the client")
-
-            else:
-                self.logger.debug("Other event sent by the client %s" % str(self.client_address))
-                self.session.add_event("Other event sent the client")
-
-        # Handle login request (DYNT Atom == \x00)
+                name = "Menu event sent the client"
+            elif not ui_event_source.valid_functionkey_data:
+                name = "Other event sent the client"
+            break
+        data = request
         atoms = diag.get_item(["APPL", "APPL4"], "DYNT", "DYNT_ATOM")
-        if len(atoms) > 0:
-            self.logger.debug("Login request sent by the client %s" % str(self.client_address))
-            inputs = []
-            for atom in [atom for atom_item in atoms for atom in atom_item.item_value.items]:
-                if atom.etype in [121, 122, 123, 130, 131, 132]:
-                    text = atom.field1_text or atom.field2_text
-                    text = text.strip()
-                    if atom.attr_DIAG_BSD_INVISIBLE and len(text) > 0:
-                        # If the invisible flag was set, we're probably
-                        # dealing with a password field
-                        self.logger.debug("Password field: %s" % (text))
-                    else:
-                        self.logger.debug("Regular field:%s" % (text))
-                    inputs.append(text)
-            self.session.add_event("Login request sent the client", data={"inputs": inputs})
+        login = {LOGIN_KEYS[field["name"]]: field["text"] for field in request.get("fields", [])
+                 if field["name"] in LOGIN_KEYS}
+        if login:
+            name = "Login request sent the client"
+            data = dict(request, inputs=[field["text"] for field in request["fields"]], **login)
+        self.logger.debug("%s %s" % (name, str(self.client_address)))
+        self.session.add_event(name, data=data)
 
-            response = SAPDiag(compress=1, message=self.make_error_screen("E: Unable to process your request, try later"))
-            self.logger.debug("Sending error message to client %s" % str(self.client_address))
+        # Every request gets an error message
+        self.logger.debug("Sending error message to client %s" % str(self.client_address))
+        try:
+            response = SAPDiag(compress=1 if atoms else 0, message=self.make_error_screen(
+                "E: Unable to process your request, try later"))
             self.session.add_event("Error message sent to the client", response=bytes(response))
             self.request.send(response)
-
-        # Otherwise we send an error message
-        else:
-            self.logger.debug("Sending error message to client %s" % str(self.client_address))
-            try:
-                response = SAPDiag(compress=0, message=self.make_error_screen("E: Unable to process your request, try later"))
-                self.session.add_event("Error message sent to the client", response=bytes(response))
-                self.request.send(response)
-            except error:
-                pass
+        except error:
+            pass
 
     def make_login_screen(self):
         self.logger.debug("Making login screen for %s" % str(self.client_address))

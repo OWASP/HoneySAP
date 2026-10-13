@@ -123,6 +123,15 @@ services:
         redirect_hostname: request
 
 
+# Metrics of the event pipeline
+# -----------------------------
+
+# Metrics records in the log feeds every 300 seconds; uncomment to serve
+# them to Prometheus as well
+#metrics:
+#    interval: 300
+#    prometheus: {enabled: yes, listener_address: 127.0.0.1, listener_port: 9180}
+
 # Feeds configuration
 # -------------------
 

@@ -16,6 +16,8 @@
 #
 
 # Standard imports
+import json
+import os
 import unittest
 from os import close, path, remove
 from tempfile import mkstemp
@@ -56,8 +58,54 @@ class LogFeedsTest(unittest.TestCase):
             logged = log_file.read()
         self.assertIn(repr(event), logged)
 
+    def test_logfeed_follows_external_rotation(self):
+        descriptor, self.test_filename = mkstemp(".log", "logfeedstest")
+        close(descriptor)
+        feed = LogFeed(Configuration({"feed": "LogFeed", "log_filename": self.test_filename}))
+        event = Event("Before rotation")
+        event.session = Session(Queue(), "test", "127.0.0.1", 3200, "127.0.0.1", 3201)
+        feed.log(event)
+        os.rename(self.test_filename, self.test_filename + ".1")
+        event = Event("After rotation")
+        event.session = Session(Queue(), "test", "127.0.0.1", 3200, "127.0.0.1", 3201)
+        feed.log(event)
+        feed.log_metrics({"accepted": 2, "feeds": {}})
+        feed.stop()
+        with open(self.test_filename + ".1", encoding="utf-8") as log_file:
+            self.assertIn("Before rotation", log_file.read())
+        with open(self.test_filename, encoding="utf-8") as log_file:
+            logged = log_file.read()
+        self.assertIn("After rotation", logged)
+        self.assertIn("Metrics " + json.dumps({"accepted": 2, "feeds": {}}), logged)
+        remove(self.test_filename + ".1")
+
+    def test_logfeed_rotates_by_size(self):
+        descriptor, self.test_filename = mkstemp(".log", "logfeedstest")
+        close(descriptor)
+        feed = LogFeed(Configuration({"feed": "LogFeed", "log_filename": self.test_filename,
+                                      "max_bytes": 2000, "backup_count": 2}))
+        for number in range(30):
+            event = Event("Event %d" % number)
+            event.session = Session(Queue(), "test", "127.0.0.1", 3200, "127.0.0.1", 3201)
+            feed.log(event)
+        feed.stop()
+        self.assertTrue(path.exists(self.test_filename + ".1"))
+        self.assertFalse(path.exists(self.test_filename + ".3"))
+        self.assertLessEqual(path.getsize(self.test_filename), 2000)
+        for suffix in (".1", ".2"):
+            if path.exists(self.test_filename + suffix):
+                remove(self.test_filename + suffix)
+
+    def test_logfeed_rotation_options_are_checked(self):
+        self.test_filename = os.devnull
+        for options in ({"max_bytes": -1}, {"max_bytes": 10, "rotate_when": "midnight"},
+                        {"backup_count": "x"}):
+            with self.assertRaises(ValueError):
+                LogFeed(Configuration(dict({"feed": "LogFeed",
+                                            "log_filename": os.devnull}, **options)))
+
     def tearDown(self):
-        if path.exists(self.test_filename):
+        if self.test_filename != os.devnull and path.exists(self.test_filename):
             remove(self.test_filename)
 
 
