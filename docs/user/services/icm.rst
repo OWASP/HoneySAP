@@ -68,8 +68,11 @@ system apps work with data down to the object pages. Their entity sets are
 recorded in full, so any page, sort order, filter or object is answered like
 SAP Gateway does (``$skip``, ``$top``, ``$orderby``, ``$filter``,
 ``$select``, ``$expand``, ``$inlinecount``, ``$count``, keys and
-navigations), also inside ``$batch``. Most other apps open and fail on their
-OData services, as on a system where these services are not
+navigations), also inside ``$batch``. Invalid queries get the errors of
+SAP Gateway (syntax errors with their positions, unknown properties, type
+mismatches, unsupported functions), in JSON or XML as the request asks;
+unknown services get ``403 No service found``. Most other apps open and fail
+on their OData services, as on a system where these services are not
 activated. The responses come from a bundle recorded on a real system and
 are filled with the :ref:`system persona <system-persona>` (SID, client,
 host, instance) and the logged on user, whose name the shell shows.
@@ -94,6 +97,11 @@ host, instance) and the logged on user, whose name the shell shows.
 - The launchpad is served over HTTP and HTTPS. With ``require_https``
   enabled it requires HTTPS like a real ICM (``403 Forbidden - SSL
   required`` on HTTP).
+- At most ``max_sessions`` sessions (default 10000) are kept; beyond that the
+  least recently used one is dropped. Sessions expire after an hour without
+  requests.
+- Host header values that are not a valid host name are not used in
+  responses or cookies; the persona's host name is used instead.
 - Requests of logged on users carry ``flp_user`` and ``flp_client`` in the
   ``ICM HTTP request`` events, so their actions after a logon can be
   followed.
@@ -119,6 +127,8 @@ Configuration::
           first_name: John, last_name: Smith}
      # Name shown for users without first_name/last_name
      default_profile: {first_name: "", last_name: ""}
+     # Logon sessions kept at most
+     max_sessions: 10000
 
 Enable it on the HTTP and/or HTTPS ICM service (``tls: {enabled: yes}``).
 Loading the bundle takes a few seconds at startup and about

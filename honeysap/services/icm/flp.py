@@ -25,6 +25,7 @@ import os
 import re
 import tarfile
 from base64 import b64encode, urlsafe_b64encode
+from collections import OrderedDict
 from datetime import datetime, timezone
 from email.utils import formatdate
 from os import urandom
@@ -36,7 +37,8 @@ from uuid import uuid4
 # External imports
 # Custom imports
 from honeysap.core.logger import Loggeable
-from honeysap.services.icm.odata import EntityStore
+from honeysap.services.icm.odata import EntityStore, ODataError, malformed_request, \
+    segment_not_found
 
 
 # Request paths of the launchpad and the services it uses
@@ -62,6 +64,7 @@ STATIC_PATHS = re.compile(r"^/sap/public/bc/(ui5_ui5|themes|ui2/logon|uics|nwdem
                           re.IGNORECASE)
 MODIFYING_METHODS = ("POST", "PUT", "PATCH", "MERGE", "DELETE")
 ODATA_SERVICE = re.compile(r"^(/sap/opu/odata/[^/]+/[^/]+/)(.*)$", re.IGNORECASE)
+SERVICE_NAME = re.compile(r"^/sap/opu/odata/([^/]+)/([^/;]+)(?:;v=(\d+))?", re.IGNORECASE)
 ENTITY_SET = re.compile(r"^[A-Za-z_]\w*$")
 # Part headers of answers computed from the entity store
 ODATA_PART_HEAD = ("HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %d\r\n"
@@ -82,6 +85,21 @@ DEFAULT_CREDENTIALS = [
 ]
 AUTH_MODES = ("list", "accept_any", "reject_all")
 SESSION_TTL = 3600
+MAX_SESSIONS = 10000
+# Host header values used in responses; others are replaced by the persona
+AUTHORITY = re.compile(r"^([A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.?|\[[0-9A-Fa-f:.]+\])(:\d{1,5})?$")
+# SAP component of the sample services, in their error messages
+COMPONENTS = {"SEPMRA_SHOP": "BC-SRV-NWD-FRA", "SEPMRA_PROD_MAN": "BC-SRV-NWD-FRA"}
+SAP_NOTE = "See SAP Note 1797736 for error analysis " \
+           "(https://service.sap.com/sap/support/notes/1797736)"
+BATCH_SAP_NOTE = "See SAP Note 1869434 for details about working with $batch " \
+                 "(https://service.sap.com/sap/support/notes/1869434)"
+SAP_TRANSACTION = "For backend administrators: use ADT feed reader \"SAP Gateway Error Log\" " \
+                  "or run transaction /IWFND/ERROR_LOG on SAP Gateway hub system and search " \
+                  "for entries with the timestamp above for more details"
+XML_ERROR_NAMESPACE = "http://schemas.microsoft.com/ado/2007/08/dataservices/metadata"
+XML_DETAIL_ORDER = ("ContentID", "code", "message", "propertyref", "severity", "target",
+                    "transition")
 
 
 def _random_token(length):
@@ -90,6 +108,19 @@ def _random_token(length):
 
 def _perf_fesrec():
     return "%d.000000" % randint(800, 30000)
+
+
+def _xml_text(value):
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def wants_json(accept, query):
+    """SAP Gateway answers JSON to $format=json or an Accept header asking
+    for it, Atom XML otherwise"""
+    requested = dict(parse_qsl(query, keep_blank_values=True)).get("$format", "")
+    if requested:
+        return requested == "json"
+    return "json" in (accept or "").lower()
 
 
 class FioriBundle(object):
@@ -130,7 +161,19 @@ class FioriBundle(object):
             self.batch.setdefault((self.normalize_path(part["service"]),
                                    self.normalize_line(part["request"])),
                                   part["file"])
+        # Service roots, in lower case
+        self.services = {match.group(1).lower() for match in
+                         (ODATA_SERVICE.match(route["path"]) for route in index["routes"])
+                         if match}
+        self.services.update(part["service"].lower() for part in index["batch"])
         self.entities = self.entity_store(index)
+        self.compressed = {}
+
+    def gzipped(self, name):
+        """Compressed file, compressed once"""
+        if name not in self.compressed:
+            self.compressed[name] = gzip.compress(self.files[name], compresslevel=6)
+        return self.compressed[name]
 
     def entity_store(self, index):
         """Entity sets recorded in full answer the queries not recorded"""
@@ -139,6 +182,10 @@ class FioriBundle(object):
         self.entity_headers = {}
         for route in index["routes"]:
             match = ODATA_SERVICE.match(route["path"])
+            if route["method"] == "GET" and match and match.group(2) == "$metadata":
+                for entry in route["responses"]:
+                    if entry["status"] == 200 and entry["file"] in self.files:
+                        store.add_metadata(match.group(1), self.files[entry["file"]])
             if route["method"] != "GET" or not match or not ENTITY_SET.match(match.group(2)):
                 continue
             for entry in route["responses"]:
@@ -156,13 +203,18 @@ class FioriBundle(object):
                           dict(parse_qsl(query, keep_blank_values=True)).get("$expand", ""))
         return store
 
-    def query_entities(self, service, resource, query):
-        """Answer of the entity store as (content type, bytes), or None"""
+    def known_service(self, path):
+        match = ODATA_SERVICE.match(path if path.endswith("/") else path + "/")
+        return bool(match) and match.group(1).lower() in self.services
+
+    def query_entities(self, service, resource, query, as_json=True):
+        """Answer of the entity store as (content type, bytes), or None.
+        Invalid requests raise ODataError; only JSON is answered."""
         options = dict(parse_qsl(query, keep_blank_values=True))
-        if options.get("$format", "json") != "json":
-            return None
+        if options.get("$format", "json") not in ("json", "xml", "atom"):
+            raise malformed_request()
         text = self.entities.query(service, unquote_plus(resource), options)
-        if text is None:
+        if text is None or not as_json:
             return None
         content_type = "text/plain; charset=utf-8" if resource.endswith("/$count") else \
             "application/json; charset=utf-8"
@@ -243,7 +295,9 @@ class FioriLaunchpad(Loggeable):
         if self.auth_mode not in AUTH_MODES:
             raise ValueError("fiori_launchpad.auth_mode must be one of %s" % ", ".join(AUTH_MODES))
         self.credentials = config.get("credentials") or DEFAULT_CREDENTIALS
-        self.sessions = {}
+        # Sessions by id, the least recently used first
+        self.sessions = OrderedDict()
+        self.max_sessions = config.get("max_sessions", MAX_SESSIONS)
         self.lock = Lock()
 
     # Request selection
@@ -279,6 +333,7 @@ class FioriLaunchpad(Loggeable):
                 if name.startswith("SAP_SESSIONID_") and value in self.sessions:
                     session = self.sessions[value]
                     session.last_seen = now
+                    self.sessions.move_to_end(value)
                     return session
         return None
 
@@ -309,7 +364,7 @@ class FioriLaunchpad(Loggeable):
         user = session.user if session else ""
         first_name, last_name = self.profile(user) if session else ("", "")
         local_address = connection.server.server_address[0] if connection else None
-        authority = request.header("Host") or self.persona.hostname
+        authority = self.authority(request) or self.persona.hostname
         return [(b"{{SID}}", self.persona.sid), (b"{{CLIENT}}", client),
                 (b"{{IP}}", self.persona.address(local_address)),
                 (b"{{HOSTNAME}}", self.persona.hostname),
@@ -321,6 +376,12 @@ class FioriLaunchpad(Loggeable):
                 (b"{{LOGIN_XSRF}}", _random_token(32) + "=")]
 
     @staticmethod
+    def authority(request):
+        """Host header of the request when it is a valid host name"""
+        host = (request.header("Host") or "").strip()
+        return host if AUTHORITY.match(host) else None
+
+    @staticmethod
     def fill(data, placeholders):
         for placeholder, value in placeholders:
             if placeholder in data:
@@ -329,13 +390,17 @@ class FioriLaunchpad(Loggeable):
 
     def build(self, request, connection, session, entry, extra_cookies=(), body=None):
         placeholders = self.placeholders(request, connection, session)
+        # Recorded files without placeholders are compressed once
+        static = body is None and not entry["template"]
         if body is None:
             body = self.bundle.files[entry["file"]]
         if entry["template"]:
             body = self.fill(body, placeholders)
         compress = entry["gzip"] and "gzip" in (request.header("Accept-Encoding") or "")
-        if compress:
-            body = gzip.compress(body)
+        if compress and static:
+            body = self.bundle.gzipped(entry["file"])
+        elif compress:
+            body = gzip.compress(body, compresslevel=6)
         headers = [("set-cookie", value) for _, value in extra_cookies]
         for cookie in entry["cookies"]:
             if cookie["name"].startswith("sap-usercontext"):
@@ -449,7 +514,7 @@ class FioriLaunchpad(Loggeable):
         if route is None:
             if session is None and not self.public(request):
                 return self.unauthenticated(request, connection)
-            if self.is_service_root(request):
+            if self.is_service_root(request) and self.bundle.known_service(request.path):
                 return self.service_document(request, session)
             return self.not_found(request, connection, session)
         if route["auth_required"] and session is None:
@@ -464,7 +529,12 @@ class FioriLaunchpad(Loggeable):
         match = ODATA_SERVICE.match(request.path)
         if not match:
             return None
-        answer = self.bundle.query_entities(match.group(1), match.group(2), request.query)
+        as_json = wants_json(request.header("Accept"), request.query)
+        try:
+            answer = self.bundle.query_entities(match.group(1), match.group(2), request.query,
+                                                as_json)
+        except ODataError as error:
+            return self.error_response(request, session, error, as_json)
         if answer is None:
             return None
         content_type, body = answer
@@ -487,10 +557,8 @@ class FioriLaunchpad(Loggeable):
     @staticmethod
     def is_service_root(request):
         """Root of an OData service, used by clients to fetch a CSRF token"""
-        path = request.path.rstrip("/")
-        return request.path.lower().startswith("/sap/opu/odata/") and \
-            request.method in ("GET", "HEAD") and path.count("/") >= 5 and \
-            not path.endswith("$metadata")
+        match = ODATA_SERVICE.match(request.path.rstrip("/") + "/")
+        return request.method in ("GET", "HEAD") and bool(match) and not match.group(2)
 
     def service_document(self, request, session):
         body = json.dumps({"d": {"EntitySets": []}}).encode()
@@ -559,6 +627,8 @@ class FioriLaunchpad(Loggeable):
         session = FioriSession(user.upper(), client, language)
         with self.lock:
             self.sessions[session.id] = session
+            while len(self.sessions) > self.max_sessions:
+                self.sessions.popitem(last=False)
         attributes = self.cookie_attributes(request)
         domain = self.sso_domain(request)
         domain = "; domain=%s" % domain if domain else ""
@@ -582,7 +652,7 @@ class FioriLaunchpad(Loggeable):
     def sso_domain(self, request):
         """Domain of the logon ticket: the request host without its first
         label, as the ICM derives it (".168.88.9" for 192.168.88.9)."""
-        host = (request.header("Host") or "").strip()
+        host = self.authority(request) or ""
         if host.startswith("["):
             return None
         host = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
@@ -634,33 +704,106 @@ class FioriLaunchpad(Loggeable):
             "method": request.method, "path": request.path,
             "part": part or ""})
 
-    def odata_error(self, status, code, message):
-        return json.dumps({"error": {"code": code, "message": {"lang": "en", "value": message},
-                                     "innererror": {"transactionid": uuid4().hex.upper(),
-                                                    "timestamp": datetime.now(timezone.utc)
-                                                    .strftime("%Y%m%d%H%M%S.%f")[:21],
-                                                    "Error_Resolution": {
-                                                        "SAP_Transaction": "For backend "
-                                                        "administrators: use ADT feed reader "
-                                                        "\"SAP Gateway Error Log\" or run "
-                                                        "transaction /IWFND/ERROR_LOG on SAP "
-                                                        "Gateway hub system and search for "
-                                                        "entries with the timestamp above for "
-                                                        "more details"}}}}).encode("utf-8")
+    # OData errors
+
+    @staticmethod
+    def service_names(path):
+        """Namespace, name and version of the OData service of a path"""
+        match = SERVICE_NAME.match(path)
+        if not match:
+            return "/SAP/", "", "0001"
+        return "/%s/" % match.group(1).upper(), match.group(2).upper(), \
+            "%04d" % int(match.group(3) or 1)
+
+    def odata_error(self, error, path, as_json=True, batch=False):
+        """Content type and body of an SAP Gateway error. Errors raised by a
+        service carry the service and their details."""
+        namespace, name, version = self.service_names(path)
+        now = datetime.now(timezone.utc)
+        transaction = uuid4().hex.upper()
+        timestamp = now.strftime("%Y%m%d%H%M%S.") + "%07d" % (now.microsecond * 10)
+        application = OrderedDict([("component_id", COMPONENTS.get(name, "")),
+                                   ("service_namespace", namespace), ("service_id", name),
+                                   ("service_version", version)])
+        resolution = OrderedDict([("SAP_Transaction", SAP_TRANSACTION), ("SAP_Note", SAP_NOTE)])
+        if batch and error.details is not None:
+            resolution["Batch_SAP_Note"] = BATCH_SAP_NOTE
+        details = [OrderedDict([("ContentID", ""), ("code", code), ("message", message),
+                                ("propertyref", ""), ("severity", "error"),
+                                ("transition", False), ("target", "")])
+                   for code, message in error.details or ()]
+        charset = "" if error.details is None else ";charset=utf-8"
+        if as_json:
+            inner = OrderedDict()
+            if error.details is not None:
+                inner["application"] = application
+            inner["transactionid"] = transaction
+            inner["timestamp"] = timestamp
+            inner["Error_Resolution"] = resolution
+            if error.details is not None:
+                inner["errordetails"] = details
+            document = {"error": OrderedDict([
+                ("code", error.code),
+                ("message", OrderedDict([("lang", "en"), ("value", error.message)])),
+                ("innererror", inner)])}
+            return "application/json" + charset, \
+                json.dumps(document, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+        def element(tag, value):
+            return "<%s>%s</%s>" % (tag, _xml_text(value), tag) if value else "<%s/>" % tag
+        body = '<?xml version="1.0" encoding="utf-8"?><error xmlns="%s">' % XML_ERROR_NAMESPACE
+        body += element("code", error.code)
+        body += '<message xml:lang="en">%s</message>' % _xml_text(error.message)
+        if error.details is None:
+            body += '<innererror xmlns="%s">' % XML_ERROR_NAMESPACE
+        else:
+            body += "<innererror><application>%s</application>" % "".join(
+                element(tag, value) for tag, value in application.items())
+        body += element("transactionid", transaction) + element("timestamp", timestamp)
+        body += "<Error_Resolution>%s</Error_Resolution>" % "".join(
+            element(tag, value) for tag, value in resolution.items())
+        if error.details is not None:
+            items = "".join("<errordetail>%s</errordetail>" % "".join(
+                element(tag, str(detail[tag]).lower() if tag == "transition" else detail[tag])
+                for tag in XML_DETAIL_ORDER) for detail in details)
+            body += "<errordetails>%s</errordetails>" % items if items else "<errordetails/>"
+        body += "</innererror></error>"
+        return "application/xml" + charset, body.encode("utf-8")
+
+    def error_response(self, request, session, error, as_json):
+        content_type, body = self.odata_error(error, request.path, as_json)
+        headers = [("content-type", content_type), ("content-length", str(len(body))),
+                   ("sap-authenticated", "true" if session else "false"),
+                   ("dataserviceversion", "1.0")]
+        if error.status == 404:
+            headers.append(("sap-cache-control", "-u"))
+        headers += [("sap-server", "true"), ("sap-perf-fesrec", _perf_fesrec())]
+        return self.service.response(request, error.status, self.service.reason(error.status),
+                                     headers, body)
+
+    def error_part(self, error, service, as_json=True):
+        content_type, body = self.odata_error(error, service, as_json, batch=True)
+        head = "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %d\r\n" \
+               "dataserviceversion: 1.0\r\n" % (error.status, self.service.reason(error.status),
+                                                content_type, len(body))
+        if error.status == 404:
+            head += "sap-cache-control: -u\r\n"
+        return head.encode() + b"\r\n" + body
 
     def not_found(self, request, connection, session):
-        if request.path.lower().startswith("/sap/opu/odata/"):
-            body = self.odata_error(404, "/IWFND/MED/170",
-                                    "No service found for namespace '', name '%s', version "
-                                    "'0001'" % request.path.rstrip("/").split("/")[-1])
-            return self.service.response(request, 404, "Not Found", [
-                ("content-type", "application/json; charset=utf-8"),
-                ("content-length", str(len(body))),
-                ("dataserviceversion", "1.0"),
-                ("sap-authenticated", "true" if session else "false"),
-                ("sap-server", "true"),
-                ("sap-perf-fesrec", _perf_fesrec())], body)
-        return self.service.icf_not_found(request, connection)
+        """Unknown resources of known OData services, and unknown services"""
+        if not request.path.lower().startswith("/sap/opu/odata/"):
+            return self.service.icf_not_found(request, connection)
+        match = ODATA_SERVICE.match(request.path)
+        if match and self.bundle.known_service(request.path):
+            error = segment_not_found(re.split(r"[/(]", match.group(2))[0])
+        else:
+            namespace, name, version = self.service_names(request.path)
+            error = ODataError(403, "/IWFND/MED/170", "No service found for namespace '%s', "
+                               "name '%s', version '%s'" % (
+                                   "" if namespace == "/SAP/" else namespace, name, version), [])
+        return self.error_response(request, session, error,
+                                   wants_json(request.header("Accept"), request.query))
 
     # $batch
 
@@ -678,13 +821,13 @@ class FioriLaunchpad(Loggeable):
                 break
             changeset = re.search(r"boundary=([^;\s]+)", text.split("\r\n\r\n")[0])
             if changeset:
-                parts.append(self.changeset(request, connection, session, text,
-                                            changeset.group(1)))
+                parts.append(self.changeset(request, connection, session, service, text))
                 continue
             line = re.search(r"\r?\n\r?\n([A-Z]+ [^\r\n]+) HTTP/1\.1", text)
             if not line:
                 continue
-            parts.append(self.batch_part(request, connection, session, service, line.group(1)))
+            parts.append(self.batch_part(request, connection, session, service, text,
+                                         line.group(1)))
         body = b"".join(b"--%s\r\nContent-Type: application/http\r\nContent-Length: %d\r\n"
                         b"content-transfer-encoding: binary\r\n\r\n%s\r\n"
                         % (boundary.encode(), len(part), part) for part in parts)
@@ -698,50 +841,48 @@ class FioriLaunchpad(Loggeable):
             ("sap-server", "true"),
             ("sap-perf-fesrec", _perf_fesrec())], body)
 
-    def batch_part(self, request, connection, session, service, line):
-        method = line.split(" ", 1)[0]
+    def batch_part(self, request, connection, session, service, text, line):
+        """Answer of a batch part: the recorded one, one computed from the
+        entity sets, the recorded direct response, or an error"""
+        method, _, target = line.partition(" ")
         if method != "GET":
             self.log_modification(connection, request, session, line)
-            return self.forbidden_part()
+            return self.forbidden_part(service)
+        placeholders = self.placeholders(request, connection, session)
         recorded = self.bundle.batch.get((service, self.bundle.normalize_line(line)))
-        if recorded is None:
-            target = line.split(" ", 1)[1].split(" HTTP/")[0]
-            resource, _, query = target.partition("?")
-            answer = self.bundle.query_entities(service, resource, query)
-            if answer is not None:
-                content_type, body = answer
-                body = self.fill(body, self.placeholders(request, connection, session))
-                return (ODATA_PART_HEAD % (content_type, len(body))).encode() + body
-        if recorded is None:
-            # The same resource requested directly
-            target = line.split(" ", 1)[1]
-            path, _, query = target.partition("?")
-            route = self.bundle.find("GET", service + path, query)
-            if route is not None:
-                entry = self.select(route, session)
-                data = self.fill(self.bundle.files[entry["file"]],
-                                 self.placeholders(request, connection, session))
-                head = "HTTP/1.1 %d %s\r\n" % (entry["status"], self.service.reason(entry["status"]))
-                head += "".join("%s: %s\r\n" % (name, value) for name, value in entry["headers"]
-                                if not name.lower().startswith("sap-"))
-                return head.encode() + b"Content-Length: %d\r\n\r\n" % len(data) + data
-            body = self.odata_error(404, "/IWBEP/CM_MGW_RT/020",
-                                    "Resource not found for segment '%s'" %
-                                    path.split("(")[0].strip("/"))
-            return (b"HTTP/1.1 404 Not Found\r\nContent-Type: application/json;charset=utf-8\r\n"
-                    b"Content-Length: %d\r\ndataserviceversion: 1.0\r\n\r\n%s" % (len(body), body))
-        message = self.fill(self.bundle.files[recorded],
-                            self.placeholders(request, connection, session))
-        return message
+        if recorded is not None:
+            return self.fill(self.bundle.files[recorded], placeholders)
+        path, _, query = target.split(" HTTP/")[0].partition("?")
+        headers = re.split(r"\r?\n\r?\n", text.split(line, 1)[1], maxsplit=1)[0]
+        accept = re.search(r"^accept:[ \t]*(.*?)\s*$", headers, re.IGNORECASE | re.MULTILINE)
+        as_json = wants_json(accept.group(1) if accept else "", query)
+        try:
+            answer = self.bundle.query_entities(service, path, query, as_json)
+        except ODataError as error:
+            return self.error_part(error, service, as_json)
+        if answer is not None:
+            content_type, body = answer
+            body = self.fill(body, placeholders)
+            return (ODATA_PART_HEAD % (content_type, len(body))).encode() + body
+        route = self.bundle.find("GET", service + path, query)
+        if route is None:
+            return self.error_part(segment_not_found(re.split(r"[/(]", path)[0]), service,
+                                   as_json)
+        # The same resource requested directly
+        entry = self.select(route, session)
+        data = self.fill(self.bundle.files[entry["file"]], placeholders)
+        head = "HTTP/1.1 %d %s\r\n" % (entry["status"], self.service.reason(entry["status"]))
+        head += "".join("%s: %s\r\n" % (name, value) for name, value in entry["headers"]
+                        if not name.lower().startswith("sap-"))
+        return head.encode() + b"Content-Length: %d\r\n\r\n" % len(data) + data
 
-    def forbidden_part(self):
-        body = self.odata_error(403, "/IWBEP/CM_MGW_RT/004",
-                                "You are not authorized to perform this action")
-        return (b"HTTP/1.1 403 Forbidden\r\nContent-Type: application/json;charset=utf-8\r\n"
-                b"Content-Length: %d\r\ndataserviceversion: 1.0\r\n\r\n%s" % (len(body), body))
+    def forbidden_part(self, service):
+        return self.error_part(ODataError(403, "/IWBEP/CM_MGW_RT/004",
+                                          "You are not authorized to perform this action"),
+                               service)
 
-    def changeset(self, request, connection, session, text, boundary):
+    def changeset(self, request, connection, session, service, text):
         """Changesets hold modifying requests: logged and refused."""
         for line in re.findall(r"\r?\n\r?\n([A-Z]+ [^\r\n]+) HTTP/1\.1", text):
             self.log_modification(connection, request, session, line)
-        return self.forbidden_part()
+        return self.forbidden_part(service)
