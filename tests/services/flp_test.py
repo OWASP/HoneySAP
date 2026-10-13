@@ -127,7 +127,11 @@ class FioriLaunchpadTest(unittest.TestCase):
         self.assertTrue(cookies[0].startswith("sap-login-XSRF_PRD="))
         self.assertTrue(cookies[1].startswith("sap-usercontext=sap-client=100"))
 
-    def test_https_is_required(self):
+    def test_https_is_optional(self):
+        response = self.request("GET", "/sap/bc/ui2/flp?sap-client=100", scheme="http")
+        self.assertEqual(response.status, 200)
+        self.assertIn(b'name="sap-client" value="100"', response.body)
+        self.service.flp.require_https = True
         response = self.request("GET", "/sap/bc/ui2/flp", scheme="http")
         self.assertEqual((response.status, response.reason), (403, "Forbidden - SSL required"))
 

@@ -87,9 +87,9 @@ host, instance) and the logged on user, whose name the shell shows.
 - Modifying requests (``POST``, ``PUT``, ``MERGE``, ``DELETE``, ``$batch``
   changesets) are logged as ``FLP data modification attempt`` and refused
   with an authorization error; reading ``$batch`` parts are answered.
-- Like an ICM, the launchpad and its services require HTTPS
-  (``403 Forbidden - SSL required`` on HTTP), unless ``require_https`` is
-  disabled.
+- The launchpad is served over HTTP and HTTPS. With ``require_https``
+  enabled it requires HTTPS like a real ICM (``403 Forbidden - SSL
+  required`` on HTTP).
 - Requests of logged on users carry ``flp_user`` and ``flp_client`` in the
   ``ICM HTTP request`` events, so their actions after a logon can be
   followed.
@@ -103,7 +103,8 @@ Configuration::
      enabled: yes
      # Recorded launchpad shipped with HoneySAP
      bundle: data/icm/flp/flp_bundle.tar.xz
-     require_https: yes
+     # Answer HTTP requests with 403 SSL required (default: no)
+     require_https: no
      # list (default), accept_any or reject_all
      auth_mode: list
      # Accepted users; without this list well-known SAP default
@@ -115,10 +116,8 @@ Configuration::
      # Name shown for users without first_name/last_name
      default_profile: {first_name: "", last_name: ""}
 
-Enable it on the HTTPS ICM service (``tls: {enabled: yes}``), and on the
-HTTP ICM service too so that the launchpad answers ``403 Forbidden - SSL
-required`` there like a real system (``require_https: no`` serves it over
-HTTP instead). Loading the bundle takes a few seconds at startup and about
+Enable it on the HTTP and/or HTTPS ICM service (``tls: {enabled: yes}``).
+Loading the bundle takes a few seconds at startup and about
 60 MB of memory; services using the same bundle share it.
 
 Configuration options
