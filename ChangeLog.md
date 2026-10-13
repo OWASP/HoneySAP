@@ -38,7 +38,9 @@
   ([@randomstr1ng](https://github.com/randomstr1ng)).
 - Message Server HTTP: All `/msgserver` commands (application server and
   logon group lists, logon data versions 1.0-1.3, group details) answered
-  like the Message Server; other paths redirect with 307. Flask is no longer
+  like the Message Server; other paths redirect with 307. The hidden
+  `parameter` command answers profile parameter queries with values of a real
+  ASCS instance, configurable with `profile_parameters`. Flask is no longer
   a dependency
   ([@randomstr1ng](https://github.com/randomstr1ng)).
 

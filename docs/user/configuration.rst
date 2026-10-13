@@ -211,7 +211,7 @@ add:
 - ``tags``: known SAP attack surfaces and patterns, e.g.
   ``cve-2025-31324-visual-composer``, ``cve-2020-6287-recon``,
   ``sap-java-admin``, ``soap-rfc``, ``webgui``, ``icm-admin``, ``adt``,
-  ``odata``, ``odata-batch``, ``system-info``, ``message-server``,
+  ``odata``, ``odata-batch``, ``system-info``, ``message-server``, ``ms-parameter-enum``,
   ``path-traversal``, ``injection-pattern``, ``request-smuggling-te-cl``,
   ``request-smuggling-duplicate-length``, ``file-upload``,
   ``scanner-user-agent``, ``no-user-agent`` and ``method-<name>`` for

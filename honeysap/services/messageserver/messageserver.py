@@ -30,6 +30,7 @@ from honeysap.core.logger import Loggeable
 from honeysap.core.evidence import EvidenceHandlerMixin
 from honeysap.core.http import HTTPResponse
 from honeysap.core.service import BaseHTTPService, BaseTCPService
+from honeysap.services.messageserver.parameters import profile_parameters
 
 
 class SAPMSClient(SAPNIClient):
@@ -134,6 +135,10 @@ MS_XML_EMPTY_FIELDS = (
      "telnet", "debug", "debugproxy", "p4http", "httpri", "httspri", "j2eeri",
      "j2eesri", "trxns"])
 
+# Characters of parameter names the Message Server does not escape
+NAME_SAFE = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+NAME_ENTITIES = {"<": "&lt;", ">": "&gt;", "&": "&amp;"}
+
 HTML_HEAD = ('<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">\r\n<HTML><HEAD>\r\n'
              '<TITLE>%s</TITLE>\r\n</HEAD><BODY>\r\n')
 
@@ -162,6 +167,14 @@ class SAPMSHTTPService(BaseHTTPService):
             "dispatcher_service_name",
             self.default_service_names.get(self.diag_port, "sapdp%02d" % instance))
         self.logon_groups = self.config.get("logon_groups", ["PUBLIC", "SPACE"])
+        # The Message Server runs in the ASCS instance, numbered like its
+        # HTTP port (81NN)
+        port = int(self.listener_port)
+        self.ms_instance = str(self.config.get(
+            "ms_instance_number",
+            "%02d" % (port - 8100) if 8100 <= port < 8200 else persona.instance_number))
+        self.parameters = profile_parameters(persona, self.ms_instance, port,
+                                             self.config.get("profile_parameters"))
 
     def _service_port(self, service_name, default, tls=None):
         for service in self.config.get("services") or []:
@@ -185,6 +198,10 @@ class SAPMSHTTPService(BaseHTTPService):
     # Request handling
 
     def request_details(self, request):
+        if request.path in ("/msgserver/text/parameter", "/msgserver/html/parameter",
+                            "/msgserver/xml/parameter"):
+            return {"action": "parameter_query",
+                    "parameters": self._parameter_names(request)}
         if request.path.startswith("/msgserver"):
             return {"action": "msgserver"}
         return {"action": "redirect_to_icm"}
@@ -210,7 +227,10 @@ class SAPMSHTTPService(BaseHTTPService):
                 "/msgserver/xml/logon": self.xml_logon,
                 "/msgserver/text/logon": self.text_logon,
                 "/msgserver/html/group": self.html_group,
-                "/msgserver/text/group": self.text_group}
+                "/msgserver/text/group": self.text_group,
+                "/msgserver/text/parameter": self.text_parameter,
+                "/msgserver/html/parameter": self.html_parameter,
+                "/msgserver/xml/parameter": self.xml_parameter}
 
     def response(self, request, body, content_type="text/plain; charset=utf-8",
                  status=200, reason="OK", location=None):
@@ -440,3 +460,48 @@ class SAPMSHTTPService(BaseHTTPService):
         if not request.query:
             return self.bad_request(request, self._missing_query())
         return self.response(request, self._group_text(request))
+
+    # Profile parameters (not in the list of commands, as on a real system)
+
+    @staticmethod
+    def _parameter_names(request):
+        """Names are taken from the query as sent, without URL decoding"""
+        return [name for name in request.query.split("&") if name]
+
+    def _parameter_values(self, request):
+        return [(name, self.parameters.get(name, "not found"))
+                for name in self._parameter_names(request)]
+
+    @staticmethod
+    def _escape_name(name):
+        return "".join(char if char in NAME_SAFE else
+                       NAME_ENTITIES.get(char, "&#x%02x;" % ord(char)) for char in name)
+
+    def text_parameter(self, request):
+        if not request.query:
+            return self.bad_request(request, self._missing_query())
+        return self.response(request, "".join("%s = %s\n" % item
+                                              for item in self._parameter_values(request)))
+
+    def html_parameter(self, request):
+        if not request.query:
+            return self.bad_request(request, self._missing_query())
+        rows = "".join("<TR><TD>%s</TD><TD>%s</TD></TR>\r\n" % (self._escape_name(name), value)
+                       for name, value in self._parameter_values(request))
+        body = ('<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">\r\n<HTML><HEAD>\r\n'
+                "<TITLE>Parameter value</TITLE>\r\n<HTML><HEAD>\r\n</HEAD><BODY>\r\n"
+                "<H1>Parameter value</H1>\r\n<BR>\r\n<TABLE BORDER>\r\n"
+                "<TR><TH>Name</TH><TH>Value</TH></TR>\r\n" + rows +
+                "</TABLE>\r\n</BODY></HTML>\r\n")
+        return self.response(request, body, "text/html; charset=utf-8")
+
+    def xml_parameter(self, request):
+        if not request.query:
+            return self.bad_request(request, self._missing_query())
+        items = "".join("<item>\r\n<NAME>%s</NAME>\r\n<VALUE>%s</VALUE>\r\n</item>\r\n"
+                        % (self._escape_name(name), value)
+                        for name, value in self._parameter_values(request))
+        body = ('<?xml version="1.0" encoding="UTF-8"?>\r\n<PARAMETER>\r\n'
+                "<DESCRIPTION>parameter values</DESCRIPTION>\r\n<VERSION>1.0</VERSION>\r\n"
+                "<PARAMETER_LIST>\r\n" + items + "</PARAMETER_LIST>\r\n</PARAMETER>\r\n")
+        return self.response(request, body, "text/html; charset=utf-8")
