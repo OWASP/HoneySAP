@@ -150,6 +150,10 @@ services:
         listener_port: 8100
         # Redirect clients to the ICM authority they used to reach this service.
         redirect_hostname: request
+        # Values answered by /msgserver/*/parameter on top of the built-in
+        # ones (null removes a parameter)
+        # profile_parameters:
+        #     login/min_password_lng: 6
 
 
 # Feeds configuration

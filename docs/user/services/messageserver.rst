@@ -78,6 +78,13 @@ Capabilities
   load-balancing clients.
 - ``/msgserver/{html,text}/group?GROUP[&GROUP...]``: logon group details;
   without a query string the kernel error page is returned.
+- ``/msgserver/{html,xml,text}/parameter?NAME[&NAME...]``: profile parameter
+  values, used by scanners to read security settings (``login/*``, ``gw/*``,
+  ``snc/*``, ...). Not in the command list, like on a real system. About 190
+  parameters of an ABAP Platform ASCS instance are answered with the persona
+  filled in (paths, hostnames, SID, client, ports); others are ``not found``.
+  Names are case-sensitive and not URL-decoded. ``profile_parameters`` sets,
+  replaces or (with ``null``) removes values.
 
 Paths are case-sensitive. Every other path is redirected to the ICM HTTP port
 with ``307 TEMPORARY REDIRECT``. The ``Host`` header of the request is echoed
@@ -88,7 +95,8 @@ in the ``host`` response header, like the Message Server does.
 Every request produces an ``MS HTTP request`` event with the same fields as
 the ICM (raw request and response bytes, all headers, body; see
 :ref:`HTTP services evidence <http-evidence>`) plus ``action``
-(``msgserver`` or ``redirect_to_icm``).
+(``msgserver``, ``parameter_query`` or ``redirect_to_icm``). Parameter
+queries also carry ``parameters``, the requested names.
 
 **Non-HTTP input**
 
@@ -130,6 +138,16 @@ HTTP ``Host`` authority supplied by the client (with the ICM port substituted).
 This is useful for Docker deployments where the emulated hostname is not
 resolvable by the client.
 
+``ms_instance_number``:
+
+Instance number of the ASCS instance in the parameter values (default: from
+the HTTP port 81NN, otherwise the persona's instance number).
+
+``profile_parameters``:
+
+Mapping of profile parameter names to values answered by the ``parameter``
+command, on top of the built-in ones; ``null`` removes a parameter.
+
 The DIAG, RFC, HTTP and HTTPS ports in the logon data are the listener ports
 of the configured Dispatcher, Gateway and ICM services (an ICM service with
 ``tls`` enabled is the HTTPS port).
@@ -145,3 +163,7 @@ Example configuration
    enabled: yes
    listener_port: 8100
    redirect_hostname: request
+   profile_parameters:
+     login/min_password_lng: 6
+     snc/enable: 0
+     gw/acl_mode: null

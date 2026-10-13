@@ -52,6 +52,7 @@ PATH_TAGS = [
     ("odata", r"^/sap/opu/odata"),
     ("bsp", r"^/sap/bc/bsp"),
     ("message-server", r"^/msgserver"),
+    ("ms-parameter-enum", r"^/msgserver/(text|html|xml)/parameter"),
     ("system-info", r"^/sap/public/(info|ping|icman/ping)"),
 ]
 PATH_PATTERNS = [(tag, re.compile(pattern, re.IGNORECASE)) for tag, pattern in PATH_TAGS]

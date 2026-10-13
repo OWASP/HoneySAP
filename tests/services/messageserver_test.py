@@ -127,3 +127,55 @@ class MessageServerHandlerTest(unittest.TestCase):
         event = handler.session.add_event.call_args.kwargs["data"]
         self.assertEqual(event["opcode"], 1)
         self.assertEqual(event["opcode_name"], "MS_SERVER_CHG")
+
+
+class MessageServerParameterTest(unittest.TestCase):
+
+    def setUp(self):
+        self.service = SAPMSHTTPService(Configuration({
+            "virtual": True, "listener_port": 8101,
+            "system": {"sid": "A4H", "hostname": "vhcala4hci", "client": "001"},
+            "profile_parameters": {"login/min_password_lng": 6, "gw/acl_mode": None,
+                                   "z/custom": "on"}}), Mock(), Mock(), Mock())
+
+    def get(self, target):
+        return self.service.handle_request(
+            HTTPRequest("GET", target, "HTTP/1.1", [("Host", "x:8101")], b"", b""), None)
+
+    def test_text(self):
+        response = self.get("/msgserver/text/parameter?SAPSYSTEMNAME&&rdisp/myname"
+                            "&ms/server_port_0&login/min_password_lng&gw/acl_mode&z/custom"
+                            "&login%2fmin_password_lng&")
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.body,
+                         b"SAPSYSTEMNAME = A4H\nrdisp/myname = vhcala4hci_A4H_01\n"
+                         b"ms/server_port_0 = PROT=HTTP,PORT=8101,TIMEOUT=20,PROCTIMEOUT=60\n"
+                         b"login/min_password_lng = 6\ngw/acl_mode = not found\n"
+                         b"z/custom = on\nlogin%2fmin_password_lng = not found\n")
+        self.assertEqual(dict(response.headers)["Content-Type"], "text/plain; charset=utf-8")
+
+    def test_html_and_xml_escape_names(self):
+        html = self.get("/msgserver/html/parameter?<s>&a\"b&DIR_TRANS").body
+        self.assertIn(b"<TR><TD>&lt;s&gt;</TD><TD>not found</TD></TR>\r\n"
+                      b"<TR><TD>a&#x22;b</TD><TD>not found</TD></TR>\r\n"
+                      b"<TR><TD>DIR_TRANS</TD><TD>/usr/sap/trans</TD></TR>\r\n", html)
+        xml = self.get("/msgserver/xml/parameter?gw/sec_info").body
+        self.assertIn(b"<item>\r\n<NAME>gw&#x2f;sec_info</NAME>\r\n"
+                      b"<VALUE>/usr/sap/A4H/SYS/global/secinfo</VALUE>\r\n</item>\r\n", xml)
+
+    def test_missing_query_and_case(self):
+        response = self.get("/msgserver/text/parameter")
+        self.assertEqual((response.status, response.version), (400, "HTTP/1.0"))
+        self.assertEqual(self.get("/msgserver/TEXT/PARAMETER?SAPSYSTEMNAME").status, 307)
+
+    def test_event_lists_parameters(self):
+        request = HTTPRequest("GET", "/msgserver/text/parameter?gw/acl_mode&snc/enable",
+                              "HTTP/1.1", [], b"", b"")
+        self.assertEqual(self.service.request_details(request),
+                         {"action": "parameter_query",
+                          "parameters": ["gw/acl_mode", "snc/enable"]})
+
+    def test_system_uuid_is_stable(self):
+        value = self.get("/msgserver/text/parameter?system/uuid").body
+        self.assertEqual(value, self.get("/msgserver/text/parameter?system/uuid").body)
+        self.assertEqual(value.decode().split(" = ")[1][14], "4")
