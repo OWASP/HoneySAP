@@ -49,7 +49,9 @@
   and sessions with configurable credentials (`FLP logon attempt` events),
   shell, catalogs, App Finder and apps, OData with CSRF tokens and `$batch`;
   queries not recorded (paging, sorting, filters, other objects) are answered
-  from the recorded entity sets; modifying requests are logged and refused. New `static_assets` logging
+  from the recorded entity sets, invalid ones get SAP Gateway errors (JSON or
+  XML); modifying requests are logged and refused. Sessions are capped
+  (`max_sessions`). New `static_assets` logging
   option ([@randomstr1ng](https://github.com/randomstr1ng)).
 
 - HTTP services: Request events add decoded query, form and JSON

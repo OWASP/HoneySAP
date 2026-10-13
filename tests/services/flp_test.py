@@ -72,7 +72,7 @@ class FioriLaunchpadTest(unittest.TestCase):
             route("GET", "/sap/bc/ui2/start_up", [response("startup")],
                   query={"sap-client": "{{CLIENT}}"}),
             route("GET", "/sap/public/bc/ui5_ui5/1/resources/~{{CACHE}}~/sap/m/library.js",
-                  [response("resource", gzip=True)], auth_required=False),
+                  [response("resource", gzip=True, template=False)], auth_required=False),
             route("GET", "/sap/bc/ui2/start_up", [response("startup", headers=[
                 ["content-type", "application/json; charset=utf-8"],
                 ["content-length", "{{CONTENT_LENGTH}}"], ["sap-authenticated", "true"],
@@ -203,7 +203,8 @@ class FioriLaunchpadTest(unittest.TestCase):
                                 headers + [("x-csrf-token", token)], batch)
         self.assertEqual(response.status, 202)
         self.assertIn(b'{"d":"one"}', response.body)
-        self.assertIn(b"Resource not found for segment 'Missing'", response.body)
+        self.assertIn(b"HTTP/1.1 404 Not Found\r\nContent-Type: application/xml\r\n", response.body)
+        self.assertIn(b"Resource not found for the segment 'Missing'.", response.body)
         self.assertIn(b"HTTP/1.1 403 Forbidden", response.body)
         events = [call.args[0] for call in self.connection.session.add_event.call_args_list]
         self.assertIn("FLP data modification attempt", events)
@@ -288,24 +289,25 @@ class FioriLaunchpadTest(unittest.TestCase):
 
     def test_unrecorded_queries_use_the_entity_sets(self):
         cookie = self.session_cookie(self.logon())
+        json_request = [("Cookie", cookie), ("Accept", "application/json")]
         response = self.request("GET", "/sap/opu/odata/sap/SRV/Things?$skip=1&$top=1&"
-                                       "$orderby=Name%20desc&$inlinecount=allpages",
-                                [("Cookie", cookie)])
+                                       "$orderby=Name%20desc&$inlinecount=allpages", json_request)
         self.assertEqual(response.status, 200)
         result = json.loads(response.body)["d"]
         self.assertEqual((result["__count"], result["results"][0]["Name"]), ("3", "three"))
         self.assertIn("https://sap.example:44300/sap/opu/odata/sap/SRV/Things(3)",
                       result["results"][0]["__metadata"]["uri"])
         self.assertEqual(dict(response.headers)["dataserviceversion"], "2.0")
-        count = self.request("GET", "/sap/opu/odata/sap/SRV/Things/$count", [("Cookie", cookie)])
+        count = self.request("GET", "/sap/opu/odata/sap/SRV/Things/$count", json_request)
         self.assertEqual((count.body, dict(count.headers)["content-type"]),
                          (b"3", "text/plain; charset=utf-8"))
         self.assertEqual(json.loads(self.request("GET", "/sap/opu/odata/sap/SRV/Things(2)",
-                                                 [("Cookie", cookie)]).body)["d"]["Name"], "two")
+                                                 json_request).body)["d"]["Name"], "two")
         fetch = self.request("HEAD", "/sap/opu/odata/sap/SRV/",
                              [("Cookie", cookie), ("x-csrf-token", "Fetch")])
         batch = (b"--b1\r\nContent-Type: application/http\r\n\r\n"
-                 b"GET Things?$skip=2&$top=5&$select=Name HTTP/1.1\r\n\r\n\r\n--b1--\r\n")
+                 b"GET Things?$skip=2&$top=5&$select=Name HTTP/1.1\r\nAccept: application/json\r\n"
+                 b"\r\n\r\n--b1--\r\n")
         response = self.request("POST", "/sap/opu/odata/sap/SRV/$batch", [
             ("Cookie", cookie), ("Content-Type", "multipart/mixed; boundary=b1"),
             ("x-csrf-token", dict(fetch.headers)["x-csrf-token"])], batch)
@@ -313,3 +315,72 @@ class FioriLaunchpadTest(unittest.TestCase):
         self.assertIn(b'"Name":"three"}]}}', response.body)
         # Without a session the logon is required
         self.assertEqual(self.request("GET", "/sap/opu/odata/sap/SRV/Things?$top=1").status, 401)
+
+    def test_odata_errors(self):
+        cookie = self.session_cookie(self.logon())
+        json_request = [("Cookie", cookie), ("Accept", "application/json")]
+        response = self.request("GET", "/sap/opu/odata/sap/SRV/Things?$top=x", json_request)
+        self.assertEqual((response.status, dict(response.headers)["content-type"]),
+                         (400, "application/json"))
+        error = json.loads(response.body)["error"]
+        self.assertEqual(error["message"]["value"], "Invalid system query options value")
+        self.assertEqual(list(error["innererror"]), ["transactionid", "timestamp",
+                                                     "Error_Resolution"])
+        self.assertRegex(error["innererror"]["timestamp"], r"^\d{14}\.\d{7}$")
+        # Without JSON in the Accept header errors are XML
+        response = self.request("GET", "/sap/opu/odata/sap/SRV/Things?$filter=Name%20eq",
+                                [("Cookie", cookie)])
+        self.assertEqual((response.status, dict(response.headers)["content-type"]),
+                         (400, "application/xml"))
+        self.assertIn(b"<message xml:lang=\"en\">Expression expected after position 7</message>",
+                      response.body)
+        response = self.request("GET", "/sap/opu/odata/sap/SRV/Things(9)", json_request)
+        self.assertEqual((response.status, dict(response.headers)["sap-cache-control"]), (404, "-u"))
+        error = json.loads(response.body)["error"]
+        self.assertEqual(error["innererror"]["application"]["service_id"], "SRV")
+        self.assertEqual(error["innererror"]["errordetails"][0]["code"],
+                         "/IWBEP/CX_MGW_BUSI_EXCEPTION")
+        # Unknown services
+        response = self.request("GET", "/sap/opu/odata/AIF/NOPE_SRV;v=2/Things", json_request)
+        self.assertEqual(response.status, 403)
+        error = json.loads(response.body)["error"]
+        self.assertEqual(error["message"]["value"], "No service found for namespace '/AIF/', "
+                                                    "name 'NOPE_SRV', version '0002'")
+        self.assertEqual(error["innererror"]["errordetails"], [])
+        response = self.request("GET", "/sap/opu/odata/sap/NOPE_SRV/", [("Cookie", cookie)])
+        self.assertEqual(response.status, 403)
+        self.assertIn(b"<component_id/><service_namespace>/SAP/</service_namespace>", response.body)
+        self.assertIn(b"<errordetails/></innererror></error>", response.body)
+        # Unknown entity sets of known services
+        response = self.request("GET", "/sap/opu/odata/sap/SRV/Nope", json_request)
+        self.assertEqual(json.loads(response.body)["error"]["message"]["value"],
+                         "Resource not found for the segment 'Nope'.")
+
+    def test_session_store_is_bounded(self):
+        self.service.flp.max_sessions = 3
+        cookies = [self.session_cookie(self.logon()) for _ in range(5)]
+        self.assertEqual(len(self.service.flp.sessions), 3)
+        self.assertEqual(self.request("GET", "/sap/bc/ui2/start_up?sap-client=100",
+                                      [("Cookie", cookies[0])]).status, 401)
+        self.assertEqual(self.request("GET", "/sap/bc/ui2/start_up?sap-client=100",
+                                      [("Cookie", cookies[-1])]).status, 200)
+
+    def test_invalid_host_is_not_reflected(self):
+        cookie = self.session_cookie(self.logon())
+        for host in ("evil.example<script>", "a.b.c; secure", "x\" onload=\"y"):
+            request = HTTPRequest("GET", "/sap/opu/odata/sap/SRV/Things(1)", "HTTP/1.1", [
+                ("Host", host), ("Cookie", cookie), ("Accept", "application/json")], b"", b"",
+                scheme="https")
+            response = self.service.handle_request(request, self.connection)
+            self.assertNotIn(host.encode(), response.body)
+            self.assertIn(b"https://sapprd01/", response.body)
+        response = self.request("POST", "/sap/bc/ui2/flp", [
+            ("Host", "a.b.c; secure"), ("Content-Type", "application/x-www-form-urlencoded")],
+            b"sap-user=DEVELOPER&sap-password=secret")
+        self.assertFalse(any("a.b.c" in value for name, value in response.headers))
+
+    def test_static_files_are_compressed_once(self):
+        path = "/sap/public/bc/ui5_ui5/1/resources/~1234~/sap/m/library.js"
+        first = self.request("GET", path, [("Accept-Encoding", "gzip")])
+        second = self.request("GET", path, [("Accept-Encoding", "gzip")])
+        self.assertIs(first.body, second.body)
