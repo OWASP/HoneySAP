@@ -99,7 +99,10 @@ setup(name=read_metadata("__title__"),  # Package information
       python_requires='>=3.10',
       # Packages list
       packages=find_packages(),
-      package_data={'honeysap.services.icm': ['templates/*.html']},
+      package_data={
+          'honeysap.services.icm': ['templates/*.html'],
+          'honeysap.services.saprouter': ['default_error_profile.yml'],
+      },
       provides=['honeysap'],
 
       # Script files
