@@ -26,6 +26,10 @@ SHELL = b"<html><body>Launchpad of {{SID}} for {{USER}}</body></html>"
 START_UP = b'{"client":"{{CLIENT}}","id":"{{USER}}","fullName":"{{FIRST_NAME}} {{LAST_NAME}}","system":"{{SID}}"}'
 RESOURCE = b"sap.ui.define([],function(){});"
 ENTITIES = b'{"d":{"results":[{"__metadata":{"uri":"https://{{AUTHORITY}}/sap/opu/odata/sap/SRV/Items(1)"}}]}}'
+THINGS = json.dumps({"d": {"__count": "3", "results": [
+    {"__metadata": {"uri": "https://{{AUTHORITY}}/sap/opu/odata/sap/SRV/Things(%d)" % n,
+                    "type": "SRV.Thing"}, "Id": n, "Name": name}
+    for n, name in ((1, "one"), (2, "two"), (3, "three"))]}}).encode()
 PART = (b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\n\r\n"
         b'{"d":"one"}')
 
@@ -55,7 +59,7 @@ class FioriLaunchpadTest(unittest.TestCase):
         cls.bundle = tempfile.mkdtemp()
         files = {"logon": LOGON_PAGE, "failed": FAILED_PAGE, "shell": SHELL,
                  "startup": START_UP, "resource": RESOURCE, "entities": ENTITIES,
-                 "part": PART}
+                 "part": PART, "things": THINGS}
         os.mkdir(os.path.join(cls.bundle, "files"))
         for name, data in files.items():
             with open(os.path.join(cls.bundle, "files", name), "wb") as f:
@@ -80,6 +84,11 @@ class FioriLaunchpadTest(unittest.TestCase):
                 ["content-type", "application/json"], ["content-length", "{{CONTENT_LENGTH}}"],
                 ["sap-authenticated", "true"], ["x-csrf-token", "{{CSRF_TOKEN}}"],
                 ["dataserviceversion", "2.0"], ["sap-server", "true"]])]),
+            route("GET", "/sap/opu/odata/sap/SRV/Things", [response("things", headers=[
+                ["content-type", "application/json; charset=utf-8"],
+                ["content-length", "{{CONTENT_LENGTH}}"], ["sap-authenticated", "true"],
+                ["dataserviceversion", "2.0"], ["sap-server", "true"]])],
+                  query={"$inlinecount": "allpages"}),
             route("GET", "/sap/bc/rest/themes/~client-{{CLIENT}}/themelist/v1/~v=UI5:1.136.10",
                   [response("resource", status=403)]),
         ], "batch": [{"service": "/sap/opu/odata/sap/SRV/", "request": "GET One?$top=1",
@@ -276,3 +285,31 @@ class FioriLaunchpadTest(unittest.TestCase):
             "virtual": True,
             "fiori_launchpad": {"enabled": True, "bundle": self.bundle}}), Mock(), Mock(), Mock())
         self.assertIs(other.flp.bundle, self.service.flp.bundle)
+
+    def test_unrecorded_queries_use_the_entity_sets(self):
+        cookie = self.session_cookie(self.logon())
+        response = self.request("GET", "/sap/opu/odata/sap/SRV/Things?$skip=1&$top=1&"
+                                       "$orderby=Name%20desc&$inlinecount=allpages",
+                                [("Cookie", cookie)])
+        self.assertEqual(response.status, 200)
+        result = json.loads(response.body)["d"]
+        self.assertEqual((result["__count"], result["results"][0]["Name"]), ("3", "three"))
+        self.assertIn("https://sap.example:44300/sap/opu/odata/sap/SRV/Things(3)",
+                      result["results"][0]["__metadata"]["uri"])
+        self.assertEqual(dict(response.headers)["dataserviceversion"], "2.0")
+        count = self.request("GET", "/sap/opu/odata/sap/SRV/Things/$count", [("Cookie", cookie)])
+        self.assertEqual((count.body, dict(count.headers)["content-type"]),
+                         (b"3", "text/plain; charset=utf-8"))
+        self.assertEqual(json.loads(self.request("GET", "/sap/opu/odata/sap/SRV/Things(2)",
+                                                 [("Cookie", cookie)]).body)["d"]["Name"], "two")
+        fetch = self.request("HEAD", "/sap/opu/odata/sap/SRV/",
+                             [("Cookie", cookie), ("x-csrf-token", "Fetch")])
+        batch = (b"--b1\r\nContent-Type: application/http\r\n\r\n"
+                 b"GET Things?$skip=2&$top=5&$select=Name HTTP/1.1\r\n\r\n\r\n--b1--\r\n")
+        response = self.request("POST", "/sap/opu/odata/sap/SRV/$batch", [
+            ("Cookie", cookie), ("Content-Type", "multipart/mixed; boundary=b1"),
+            ("x-csrf-token", dict(fetch.headers)["x-csrf-token"])], batch)
+        self.assertIn(b"HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8", response.body)
+        self.assertIn(b'"Name":"three"}]}}', response.body)
+        # Without a session the logon is required
+        self.assertEqual(self.request("GET", "/sap/opu/odata/sap/SRV/Things?$top=1").status, 401)

@@ -64,8 +64,12 @@ With ``fiori_launchpad`` enabled, the ICM serves an SAP Fiori launchpad of an
 ABAP Platform system (launchpad 1.136, SAPUI5 1.136): the logon page, the
 shell with its catalogs, App Finder, user menu, settings and search, and the
 apps of the recorded system. Two sample apps (Shop, Manage Products) and two
-system apps work with data down to the object pages; most other apps open and
-fail on their OData services, as on a system where these services are not
+system apps work with data down to the object pages. Their entity sets are
+recorded in full, so any page, sort order, filter or object is answered like
+SAP Gateway does (``$skip``, ``$top``, ``$orderby``, ``$filter``,
+``$select``, ``$expand``, ``$inlinecount``, ``$count``, keys and
+navigations), also inside ``$batch``. Most other apps open and fail on their
+OData services, as on a system where these services are not
 activated. The responses come from a bundle recorded on a real system and
 are filled with the :ref:`system persona <system-persona>` (SID, client,
 host, instance) and the logged on user, whose name the shell shows.
