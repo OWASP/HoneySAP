@@ -16,6 +16,7 @@
 #
 
 # Standard imports
+import re
 import os
 from base64 import b64decode
 from binascii import Error as Base64Error
@@ -166,8 +167,11 @@ class SAPICMService(BaseHTTPService):
         return {key.lower(): values[-1] for key, values in
                 parse_qs(request.query, keep_blank_values=True).items()}
 
-    def client(self, request):
-        return self.query(request).get("sap-client") or self.persona.client
+    def client(self, request, value=None):
+        """Client of a request; values that are not a client number are
+        ignored like a missing one."""
+        value = value if value is not None else self.query(request).get("sap-client")
+        return value if value and re.fullmatch(r"\d{3}", value) else self.persona.client
 
     def logon_language(self, request):
         language = self.query(request).get("sap-language")

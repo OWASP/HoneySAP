@@ -89,6 +89,18 @@ def _perf_fesrec():
 class FioriBundle(object):
     """Index of the recorded launchpad responses."""
 
+    _loaded = {}
+    _lock = Lock()
+
+    @classmethod
+    def load(cls, path):
+        """Bundle for a path, loaded once and shared by the services using it."""
+        key = os.path.realpath(path)
+        with cls._lock:
+            if key not in cls._loaded:
+                cls._loaded[key] = cls(path)
+            return cls._loaded[key]
+
     def __init__(self, path):
         self.files = {}
         if os.path.isdir(path):
@@ -182,7 +194,7 @@ class FioriLaunchpad(Loggeable):
         bundle = config.get("bundle")
         if not bundle:
             raise ValueError("fiori_launchpad.bundle is required")
-        self.bundle = FioriBundle(bundle)
+        self.bundle = FioriBundle.load(bundle)
         self.require_https = config.get("require_https", True)
         self.auth_mode = config.get("auth_mode", "list")
         if self.auth_mode not in AUTH_MODES:
@@ -227,15 +239,15 @@ class FioriLaunchpad(Loggeable):
                     return session
         return None
 
-    def valid_credentials(self, user, password, client):
+    def valid_credentials(self, user, password):
+        """The client is not checked: logons to any client are accepted."""
         if self.auth_mode == "accept_any":
             return bool(user and password)
         if self.auth_mode == "reject_all":
             return False
         for credential in self.credentials:
             if credential.get("user", "").upper() == user.upper() and \
-               credential.get("password") == password and \
-               str(credential.get("client", client)) == client:
+               credential.get("password") == password:
                 return True
         return False
 
@@ -459,9 +471,9 @@ class FioriLaunchpad(Loggeable):
         form = self.form(request)
         user = form.get("sap-user", "")[:12]
         password = form.get("sap-password", "")
-        client = form.get("sap-client") or self.persona.client
+        client = self.service.client(request, form.get("sap-client", ""))
         language = (form.get("sap-language") or self.persona.language).upper()
-        success = self.valid_credentials(user, password, client)
+        success = self.valid_credentials(user, password)
         connection.session.add_event("FLP logon attempt", data={
             "user": user, "password": password, "client": client,
             "language": language, "success": success,
@@ -514,7 +526,7 @@ class FioriLaunchpad(Loggeable):
             return None
         user, password = credentials
         client = self.service.client(request)
-        success = self.valid_credentials(user, password, client)
+        success = self.valid_credentials(user, password)
         connection.session.add_event("FLP logon attempt", data={
             "user": user, "password": password, "client": client,
             "method": "basic", "success": success, "auth_mode": self.auth_mode})
