@@ -914,6 +914,14 @@ class SAPRouterHandlerTest(unittest.TestCase):
                                     route_offset=len(bytes(hops[0])), route_string=hops)
                 handler.route_request(SAPRouter(bytes(request)))
                 response = handler.request.send.call_args.args[0]
+                event, = handler.session.add_event.call_args_list[0].args
+                data = handler.session.add_event.call_args_list[0].kwargs["data"]
+                self.assertIn(event, ("Route request allowed, valid password",
+                                      "Route request allowed, invalid password"))
+                self.assertEqual(data["password"], route_password or "")
+                self.assertEqual(data["outcome"], "accepted" if name == "valid" else "rejected")
+                self.assertEqual(handler.session.add_event.call_args_list[0].kwargs["request"],
+                                 bytes(SAPRouter(bytes(request))))
                 self.assertEqual(response.return_code, expected_code)
                 if expected_code == -94:
                     self.assertEqual(response.err_text_value.error,
@@ -922,6 +930,20 @@ class SAPRouterHandlerTest(unittest.TestCase):
                     self.assertEqual(response.err_text_value.detail, b"H<1>")
                     self.assertEqual(response.err_text_value.error_count, b"4")
                     handler.server.service_manager.find_service_by_address.assert_not_called()
+
+    def test_router_admin_request_retains_password_and_raw_packet(self):
+        handler = self.make_router_handler()
+        request = SAPRouter(type=SAPRouter.SAPROUTER_ADMIN, version=40,
+                            adm_command=2, adm_password=b"synthetic-secret\x00")
+        handler.handle_admin(request)
+        event, = handler.session.add_event.call_args_list[0].args
+        data = handler.session.add_event.call_args_list[0].kwargs["data"]
+        self.assertEqual(event, "SAPRouter admin authentication attempt")
+        self.assertEqual(data["password"], "synthetic-secret")
+        self.assertEqual(data["password_raw"], b"synthetic-secret\x00")
+        self.assertEqual(data["outcome"], "rejected")
+        self.assertEqual(handler.session.add_event.call_args_list[0].kwargs["request"],
+                         bytes(request))
 
 def test_suite():
     loader = unittest.TestLoader()

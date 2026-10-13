@@ -152,6 +152,17 @@ The password for information requests. When the option is set, the SAP Router
 will only provide response to information requests if the password in the
 requests matches.
 
+**Route and administration credential capture**
+
+Route-password submissions and SAProuter administration/info requests are
+recorded through the HoneySAP event flow. Each event includes the decoded
+password, its raw on-wire field, the complete received packet, and an
+``accepted`` or ``rejected`` outcome. Route attempts are recorded for allowed,
+denied, unavailable-target, and password-mismatch paths; administration
+requests are recorded whether external administration is enabled or denied.
+These fields intentionally retain sensitive attacker-supplied material, so
+protect event feeds and packet retention accordingly.
+
 ``external_admin``:
 
 If the external administration is enabled for this SAP router instance.

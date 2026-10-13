@@ -287,6 +287,39 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
         self.emit_profile_error("invalid_route", reason=reason)
         return False
 
+    @staticmethod
+    def _event_request(packet):
+        """Preserve the complete received packet in an authentication event."""
+        try:
+            return bytes(packet)
+        except Exception:
+            return str(packet)
+
+    def _record_route_password_attempt(self, event, packet, route_string,
+                                       target_host, target_port, password,
+                                       outcome):
+        """Record the raw route password and packet for collection profiles."""
+        self.session.add_event(event, data={
+            "target_host": target_host,
+            "target_port": target_port,
+            "password": password,
+            "password_raw": route_string.password,
+            "outcome": outcome,
+        }, request=self._event_request(packet))
+
+    def _record_admin_password_attempt(self, pkt, command_name, outcome):
+        """Record an admin/info password submission and its original packet."""
+        password_raw = getattr(pkt, "adm_password", b"")
+        password = (password_raw.rstrip(b"\x00").decode("utf-8", errors="replace")
+                    if isinstance(password_raw, bytes) else str(password_raw))
+        self.session.add_event("SAPRouter admin authentication attempt", data={
+            "command": pkt.adm_command,
+            "command_name": command_name,
+            "password": password,
+            "password_raw": password_raw,
+            "outcome": outcome,
+        }, request=self._event_request(pkt))
+
     def route_request(self, pkt):
         """Perform a lookup on the route table and routes the packet accordingly
         if allowed.
@@ -319,6 +352,9 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
 
         if action == RouteTable.ROUTE_DENY:
             self.logger.debug("Route to %s:%s denied" % (target_host, target_port))
+            self._record_route_password_attempt("Route request denied", pkt,
+                                                route_string, target_host, target_port,
+                                                route_password, "rejected")
             self.deny_route(target_host, target_port)
             return
 
@@ -326,6 +362,9 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
             self.logger.debug("Talk mode (%d) to %s:%s denied" % (pkt.route_talk_mode,
                                                                   route_string.hostname,
                                                                   route_string.port))
+            self._record_route_password_attempt("Route request denied", pkt,
+                                                route_string, target_host, target_port,
+                                                route_password, "rejected")
             self.deny_route(target_host, target_port)
             return
 
@@ -334,28 +373,25 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
                 if password == route_password:
                     self.logger.debug("Valid password for route to %s:%s" % (route_string.hostname,
                                                                              route_string.port))
-                    self.session.add_event("Route request allowed, valid password", data={"target_host": route_string.hostname,
-                                                                                          "target_port": route_string.port,
-                                                                                          "password": route_string.password},
-                                           request=str(pkt))
+                    self._record_route_password_attempt(
+                        "Route request allowed, valid password", pkt, route_string,
+                        target_host, target_port, route_password, "accepted")
 
                 else:
                     self.logger.debug("Invalid password for route to %s:%s" % (route_string.hostname,
                                                                                route_string.port))
-                    self.session.add_event("Route request allowed, invalid password", data={"target_host": route_string.hostname,
-                                                                                            "target_port": route_string.port,
-                                                                                            "password": route_string.password},
-                                           request=str(pkt))
+                    self._record_route_password_attempt(
+                        "Route request allowed, invalid password", pkt, route_string,
+                        target_host, target_port, route_password, "rejected")
                     self.deny_route(target_host, target_port)
                     return
 
             else:
                 self.logger.debug("Route request allowed to %s:%s" % (route_string.hostname,
                                                                       route_string.port))
-                self.session.add_event("Route request allowed", data={"target": route_string.hostname,
-                                                                      "port": route_string.port,
-                                                                      "password": route_string.password},
-                                       request=str(pkt))
+                self._record_route_password_attempt("Route request allowed", pkt,
+                                                    route_string, target_host, target_port,
+                                                    route_password, "accepted")
 
         # The route is accepted, now look the service for the target address/port
         # and register it as routed
@@ -368,10 +404,10 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
         if service is None:
             self.logger.debug("Target service %s:%s not available", target_host,
                               target_port)
-            self.session.add_event("Target service not available", data={"target": target_host,
-                                                                         "port": target_port,
-                                                                         "password": route_password},
-                                   request=str(pkt))
+            self._record_route_password_attempt("Target service not available", pkt,
+                                                route_string, target_host,
+                                                target_port, route_password,
+                                                "rejected")
             if pkt.route_talk_mode == RouteTable.MODE_RAW:
                 # The configured raw route behavior acknowledges the route,
                 # then closes when the local partner is unavailable.
@@ -439,6 +475,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
 
         if not self.external_admin:
             self.logger.debug("External administration disabled")
+            self._record_admin_password_attempt(pkt, command_name, "rejected")
             if pkt.adm_command == 2:
                 return self.emit_profile_error("admin_info_denied")
             return self.emit_profile_error("admin_denied")
@@ -449,11 +486,13 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
 
             # If a password was specified but doesn't match, return error
             if self.info_password and self.info_password != pkt.adm_password.strip(b"\x00").decode():
-                self.session.add_event("Information request invalid password", data=pkt.adm_password, request=str(self.packet))
+                self._record_admin_password_attempt(pkt, command_name, "rejected")
                 return self.emit_profile_error("admin_password_denied")
             else:
-                self.session.add_event("Information request valid password", data=pkt.adm_password, request=str(self.packet))
+                self._record_admin_password_attempt(pkt, command_name, "accepted")
                 return self.return_info()
+
+        self._record_admin_password_attempt(pkt, command_name, "accepted")
 
         # Trace connection request
         if pkt.adm_command == 12:
