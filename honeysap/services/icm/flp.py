@@ -195,7 +195,7 @@ class FioriLaunchpad(Loggeable):
         if not bundle:
             raise ValueError("fiori_launchpad.bundle is required")
         self.bundle = FioriBundle.load(bundle)
-        self.require_https = config.get("require_https", True)
+        self.require_https = config.get("require_https", False)
         self.auth_mode = config.get("auth_mode", "list")
         if self.auth_mode not in AUTH_MODES:
             raise ValueError("fiori_launchpad.auth_mode must be one of %s" % ", ".join(AUTH_MODES))

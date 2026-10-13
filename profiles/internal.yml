@@ -106,12 +106,12 @@ services:
         alias: ICMService
         enabled: yes
         listener_port: 8000
-        # The launchpad answers "403 Forbidden - SSL required" over HTTP like
-        # an ICM; set require_https: no to serve it here too
+        # Fiori launchpad over HTTP; require_https: yes answers
+        # "403 Forbidden - SSL required" like an ICM instead
         fiori_launchpad:
             enabled: yes
             bundle: data/icm/flp/flp_bundle.tar.xz
-            require_https: yes
+            require_https: no
 
     -
         # SAP ICM (HTTPS) service
