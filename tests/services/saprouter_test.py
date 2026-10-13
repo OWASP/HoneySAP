@@ -49,8 +49,8 @@ class SAPRouterTest(unittest.TestCase):
                          started)
 
     def test_default_profile_is_release_neutral(self):
-        first = resolve_error_profile(100)
-        second = resolve_error_profile(200)
+        first = resolve_error_profile()
+        second = resolve_error_profile()
         self.assertEqual(first, second)
         self.assertEqual(first, DEFAULT_ERROR_PROFILE)
         self.assertFalse(first["error_count"]["enabled"])
@@ -58,18 +58,18 @@ class SAPRouterTest(unittest.TestCase):
         self.assertFalse(first["unknown_packet_error"])
 
     def test_packet_behavior_profile_overrides_and_normalization(self):
-        modern = resolve_error_profile(100, {
+        modern = resolve_error_profile({
             "max_request_length": "64", "unknown_packet_error": False})
         self.assertEqual(modern["max_request_length"], 64)
         self.assertFalse(modern["unknown_packet_error"])
-        self.assertEqual(resolve_error_profile(100, {
+        self.assertEqual(resolve_error_profile({
             "max_request_length": None})["max_request_length"], None)
-        self.assertEqual(resolve_error_profile(200, {
+        self.assertEqual(resolve_error_profile({
             "max_request_length": 128})["max_request_length"], 128)
-        self.assertIsNone(resolve_error_profile(100)["max_request_length"])
+        self.assertIsNone(resolve_error_profile()["max_request_length"])
 
     def test_partial_overrides_do_not_mutate_version_defaults(self):
-        custom = resolve_error_profile(100, {
+        custom = resolve_error_profile({
             "fields": {"component": "Router NI"},
             "error_count": {"start": 10},
             "errors": {"route_denied": {"error": "blocked $target_host"}}
@@ -80,17 +80,17 @@ class SAPRouterTest(unittest.TestCase):
                          "blocked $target_host")
         self.assertEqual(DEFAULT_ERROR_PROFILE["fields"]["component"],
                          "NI (network interface)")
-        self.assertEqual(resolve_error_profile(100)["error_count"]["start"], 1)
+        self.assertEqual(resolve_error_profile()["error_count"]["start"], 1)
 
     def test_invalid_route_can_override_one_line_or_all_lines(self):
-        one = resolve_error_profile(100, {"errors": {"invalid_route": {
+        one = resolve_error_profile({"errors": {"invalid_route": {
             "line_by_reason": {"bad_offset": "908"}}}})
         self.assertEqual(render_error_options(
             one, "invalid_route", TEMPLATE_CONTEXT, "bad_offset")["line"], "908")
         self.assertEqual(render_error_options(
             one, "invalid_route", TEMPLATE_CONTEXT, "no_hops")["line"], "")
 
-        all_lines = resolve_error_profile(100, {"errors": {"invalid_route": {
+        all_lines = resolve_error_profile({"errors": {"invalid_route": {
             "line": "same-line"}}})
         self.assertEqual(render_error_options(
             all_lines, "invalid_route", TEMPLATE_CONTEXT, "bad_offset")["line"],
@@ -114,7 +114,7 @@ class SAPRouterTest(unittest.TestCase):
         for overrides in invalid:
             with self.subTest(overrides=overrides):
                 with self.assertRaises(ValueError):
-                    resolve_error_profile(916, overrides)
+                    resolve_error_profile(overrides)
 
         config = Configuration({"error_profile": invalid[1], "virtual": True})
         with patch.object(SAPRouterService, "server_cls") as server_cls:
@@ -146,8 +146,7 @@ class SAPRouterTest(unittest.TestCase):
                 self.assertTrue(service.get("enabled"))
                 self.assertIsNotNone(service.get("release"))
                 self.assertIsInstance(service.get("error_profile"), dict)
-                resolved = resolve_error_profile(service.get("release"),
-                                                 service.get("error_profile"))
+                resolved = resolve_error_profile(service.get("error_profile"))
                 self.assertIn("fields", resolved)
                 self.assertIn("errors", resolved)
                 self.assertIn("error_count", resolved)

@@ -18,7 +18,6 @@
 # Standard imports
 from datetime import datetime
 from ipaddress import ip_address
-from string import Template
 # External imports
 from scapy.packet import Raw
 from scapy.utils import hexdump
@@ -39,7 +38,8 @@ from honeysap.core.logger import Loggeable
 from honeysap.core.service import BaseTCPService
 
 from .routetable import RouteTable
-from .error_profiles import (resolve_error_profile, render_error_options)
+from .error_profiles import (render_error_fields, render_error_options,
+                             resolve_error_profile)
 
 
 def saprouter_time(dt):
@@ -86,7 +86,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
     @property
     def error_profile(self):
         return getattr(self.server, "error_profile", None) or resolve_error_profile(
-            self.release, self.config.get("error_profile", None))
+            self.config.get("error_profile", None))
 
     @property
     def partner_name_mode(self):
@@ -605,8 +605,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
                           router_return_codes.get(options.get("return_code"), "unknown"))
 
         context = self.error_context()
-        fields = {key: Template(str(value)).substitute(context)
-                  for key, value in profile["fields"].items()}
+        fields = render_error_fields(profile, context)
         fields.setdefault("error_time", datetime.now().strftime(
             str(profile["error_time_format"])))
         error_text = SAPRouterError(**fields)
@@ -660,9 +659,7 @@ class SAPRouterService(BaseTCPService):
     handler_cls = SAPRouterServerHandler
 
     def setup_server(self):
-        error_profile = resolve_error_profile(
-            int(self.config.get("release", 0)),
-            self.config.get("error_profile", None))
+        error_profile = resolve_error_profile(self.config.get("error_profile", None))
         error_count_start = int(self.config.get(
             "error_count_start", error_profile["error_count"]["start"]))
         if error_count_start < 0:

@@ -61,6 +61,11 @@ emulate a particular build. The profile supports:
 * ``partner_name_mode``: ``literal`` or ``loopback`` for a permitted but
   unreachable loopback partner.
 
+Profiles may also use ``extends: default`` in a separate YAML fragment. The
+built-in baseline and build-specific overlays use this form, so an overlay
+only needs to list changed fields. Inheritance is resolved before validation;
+cyclic or unknown parents reject the configuration.
+
 Text values use ``$name`` or ``${name}`` placeholders. Available names are
 ``hostname``, ``release``, ``router_version``, ``router_version_patch``,
 ``peer_ip``, ``target_host``, ``target_port``, ``partner_host``,
@@ -98,7 +103,8 @@ To construct a profile, start with an ordinary ``SAPRouterService`` entry,
 set the identity fields such as ``release``, ``router_version``, and
 ``router_version_patch``, then place observed differences under
 ``error_profile``. Prefer partial overrides of the built-in baseline unless a
-self-contained profile is needed for distribution. Keep dynamic values as
+self-contained profile is needed for distribution. A fragment can begin with
+``extends: default`` to make that relationship explicit. Keep dynamic values as
 templates, and expose behavioral differences such as request limits or error
 serial steps as settings instead of branching on a particular release in the
 handler.
