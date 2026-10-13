@@ -198,9 +198,9 @@ class FioriLaunchpadTest(unittest.TestCase):
     def test_auth_modes(self):
         launchpad = self.service.flp
         launchpad.auth_mode = "accept_any"
-        self.assertTrue(launchpad.valid_credentials("ANYONE", "x", "100"))
+        self.assertTrue(launchpad.valid_credentials("ANYONE", "x"))
         launchpad.auth_mode = "reject_all"
-        self.assertFalse(launchpad.valid_credentials("DEVELOPER", "secret", "100"))
+        self.assertFalse(launchpad.valid_credentials("DEVELOPER", "secret"))
 
     def test_static_assets_are_not_logged_by_default(self):
         request = HTTPRequest("GET", "/sap/public/bc/ui5_ui5/1/resources/~X~/sap/m/library.js",
@@ -252,3 +252,23 @@ class FioriLaunchpadTest(unittest.TestCase):
                                      "cache-control", "pragma", "expires"])
         self.assertIn(("cache-control", "no-store, no-cache"), uncached.headers)
         self.assertNotIn("last-modified", names)
+
+    def test_client_is_ignored(self):
+        for client in ("200", "", "x\r\nset-cookie: a=b"):
+            body = ("sap-user=DEVELOPER&sap-password=secret&sap-client=%s" % client).encode()
+            response = self.request("POST", "/sap/bc/ui2/flp", [
+                ("Content-Type", "application/x-www-form-urlencoded")], body)
+            self.assertEqual(response.status, 302)
+            location = dict(response.headers)["location"]
+            self.assertEqual(location, "/sap/bc/ui2/flp?sap-client=%s&sap-language=EN" %
+                             (client if client == "200" else "100"))
+        response = self.request("POST", "/sap/bc/ui2/flp", [
+            ("Content-Type", "application/x-www-form-urlencoded")],
+            b"sap-user=DEVELOPER&sap-password=secret")
+        self.assertEqual(response.status, 302)
+
+    def test_bundle_is_shared(self):
+        other = SAPICMService(Configuration({
+            "virtual": True,
+            "fiori_launchpad": {"enabled": True, "bundle": self.bundle}}), Mock(), Mock(), Mock())
+        self.assertIs(other.flp.bundle, self.service.flp.bundle)

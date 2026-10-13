@@ -74,7 +74,9 @@ host, instance) and the logged on user, whose name the shell shows.
   ``credentials`` (``auth_mode: list``), accept every user
   (``accept_any``) or reject all (``reject_all``). Each attempt is logged as
   ``FLP logon attempt`` with ``user``, ``password``, ``client`` and
-  ``success``. A successful logon gets ``MYSAPSSO2`` and
+  ``success``. The client is not checked: logons to any client, or
+  without one, are accepted (an invalid client number is replaced by the
+  persona's). A successful logon gets ``MYSAPSSO2`` and
   ``SAP_SESSIONID_<SID>_<client>`` cookies and a session; like an ICM the
   ticket's cookie domain is the request host without its first label.
 - OData requests get CSRF tokens like SAP Gateway: a token is issued for
@@ -106,16 +108,18 @@ Configuration::
      auth_mode: list
      # Accepted users; without this list well-known SAP default
      # credentials are accepted (SAP*, DDIC, EARLYWATCH, TMSADM, SAPCPIC,
-     # DEVELOPER, ...). client is optional; first_name/last_name are shown
-     # in the shell.
+     # DEVELOPER, ...). first_name/last_name are shown in the shell.
      credentials:
-       - {user: DEVELOPER, password: "Welcome1", client: "100",
+       - {user: DEVELOPER, password: "Welcome1",
           first_name: John, last_name: Smith}
      # Name shown for users without first_name/last_name
      default_profile: {first_name: "", last_name: ""}
 
-Enable it on the HTTPS ICM service (``tls: {enabled: yes}``). Loading the
-bundle takes a few seconds at startup and about 60 MB of memory.
+Enable it on the HTTPS ICM service (``tls: {enabled: yes}``), and on the
+HTTP ICM service too so that the launchpad answers ``403 Forbidden - SSL
+required`` there like a real system (``require_https: no`` serves it over
+HTTP instead). Loading the bundle takes a few seconds at startup and about
+60 MB of memory; services using the same bundle share it.
 
 Configuration options
 ---------------------
