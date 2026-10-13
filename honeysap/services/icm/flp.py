@@ -36,6 +36,7 @@ from uuid import uuid4
 # External imports
 # Custom imports
 from honeysap.core.logger import Loggeable
+from honeysap.services.icm.odata import EntityStore
 
 
 # Request paths of the launchpad and the services it uses
@@ -60,6 +61,11 @@ STATIC_PATHS = re.compile(r"^/sap/public/bc/(ui5_ui5|themes|ui2/logon|uics|nwdem
                           r"\.(js|css|properties|json|png|jpg|gif|svg|woff2?|ttf|ico)$",
                           re.IGNORECASE)
 MODIFYING_METHODS = ("POST", "PUT", "PATCH", "MERGE", "DELETE")
+ODATA_SERVICE = re.compile(r"^(/sap/opu/odata/[^/]+/[^/]+/)(.*)$", re.IGNORECASE)
+ENTITY_SET = re.compile(r"^[A-Za-z_]\w*$")
+# Part headers of answers computed from the entity store
+ODATA_PART_HEAD = ("HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %d\r\n"
+                   "cache-control: no-store, no-cache\r\ndataserviceversion: 2.0\r\n\r\n")
 
 # Well-known default and trial credentials accepted by default
 DEFAULT_CREDENTIALS = [
@@ -124,6 +130,43 @@ class FioriBundle(object):
             self.batch.setdefault((self.normalize_path(part["service"]),
                                    self.normalize_line(part["request"])),
                                   part["file"])
+        self.entities = self.entity_store(index)
+
+    def entity_store(self, index):
+        """Entity sets recorded in full answer the queries not recorded"""
+        store = EntityStore()
+        # Headers of the direct responses per entity set
+        self.entity_headers = {}
+        for route in index["routes"]:
+            match = ODATA_SERVICE.match(route["path"])
+            if route["method"] != "GET" or not match or not ENTITY_SET.match(match.group(2)):
+                continue
+            for entry in route["responses"]:
+                if entry["status"] == 200 and entry["file"] in self.files:
+                    store.add(match.group(1), match.group(2), self.files[entry["file"]],
+                              route["query"].get("$expand", ""))
+                    self.entity_headers.setdefault((match.group(1), match.group(2)), entry)
+        for part in index["batch"]:
+            method, _, target = part["request"].partition(" ")
+            path, _, query = target.partition("?")
+            data = self.files.get(part["file"], b"")
+            head, _, body = data.partition(b"\r\n\r\n")
+            if method == "GET" and ENTITY_SET.match(path) and head.startswith(b"HTTP/1.1 200"):
+                store.add(part["service"], path, body,
+                          dict(parse_qsl(query, keep_blank_values=True)).get("$expand", ""))
+        return store
+
+    def query_entities(self, service, resource, query):
+        """Answer of the entity store as (content type, bytes), or None"""
+        options = dict(parse_qsl(query, keep_blank_values=True))
+        if options.get("$format", "json") != "json":
+            return None
+        text = self.entities.query(service, unquote_plus(resource), options)
+        if text is None:
+            return None
+        content_type = "text/plain; charset=utf-8" if resource.endswith("/$count") else \
+            "application/json; charset=utf-8"
+        return content_type, text.encode("utf-8")
 
     @staticmethod
     def normalize_path(path):
@@ -284,9 +327,10 @@ class FioriLaunchpad(Loggeable):
                 data = data.replace(placeholder, value.encode("utf-8"))
         return data
 
-    def build(self, request, connection, session, entry, extra_cookies=()):
+    def build(self, request, connection, session, entry, extra_cookies=(), body=None):
         placeholders = self.placeholders(request, connection, session)
-        body = self.bundle.files[entry["file"]]
+        if body is None:
+            body = self.bundle.files[entry["file"]]
         if entry["template"]:
             body = self.fill(body, placeholders)
         compress = entry["gzip"] and "gzip" in (request.header("Accept-Encoding") or "")
@@ -397,6 +441,11 @@ class FioriLaunchpad(Loggeable):
     def respond(self, request, connection, session):
         route = self.bundle.find(request.method, request.path, request.query,
                                  "auth" if session else "unauth")
+        if session is not None and request.method in ("GET", "HEAD") and (
+                route is None or route["query"] != self.bundle.normalize_query(request.query)):
+            response = self.entity_response(request, connection, session)
+            if response is not None:
+                return response
         if route is None:
             if session is None and not self.public(request):
                 return self.unauthenticated(request, connection)
@@ -409,6 +458,31 @@ class FioriLaunchpad(Loggeable):
             self.log_modification(connection, request, session)
         return self.build(request, connection, session, self.select(route, session),
                           self.logon_page_cookies(request, route, session))
+
+    def entity_response(self, request, connection, session):
+        """Query not recorded, answered from the recorded entity sets"""
+        match = ODATA_SERVICE.match(request.path)
+        if not match:
+            return None
+        answer = self.bundle.query_entities(match.group(1), match.group(2), request.query)
+        if answer is None:
+            return None
+        content_type, body = answer
+        entity_set = re.match(r"[A-Za-z_]\w*", match.group(2))
+        entry = self.bundle.entity_headers.get(
+            (match.group(1), entity_set.group(0) if entity_set else ""))
+        if entry is None:
+            entry = {"status": 200, "reason": "OK", "gzip": True, "template": True,
+                     "cookies": [], "headers": [
+                         ["content-type", content_type],
+                         ["content-length", "{{CONTENT_LENGTH}}"],
+                         ["sap-authenticated", "true"], ["dataserviceversion", "2.0"],
+                         ["cache-control", "no-store, no-cache"], ["sap-server", "true"],
+                         ["sap-perf-fesrec", ""], ["content-encoding", "{{CONTENT_ENCODING}}"]]}
+        entry = dict(entry, template=True, headers=[
+            [name, content_type if name.lower() == "content-type" else value]
+            for name, value in entry["headers"]])
+        return self.build(request, connection, session, entry, body=body)
 
     @staticmethod
     def is_service_root(request):
@@ -630,6 +704,14 @@ class FioriLaunchpad(Loggeable):
             self.log_modification(connection, request, session, line)
             return self.forbidden_part()
         recorded = self.bundle.batch.get((service, self.bundle.normalize_line(line)))
+        if recorded is None:
+            target = line.split(" ", 1)[1].split(" HTTP/")[0]
+            resource, _, query = target.partition("?")
+            answer = self.bundle.query_entities(service, resource, query)
+            if answer is not None:
+                content_type, body = answer
+                body = self.fill(body, self.placeholders(request, connection, session))
+                return (ODATA_PART_HEAD % (content_type, len(body))).encode() + body
         if recorded is None:
             # The same resource requested directly
             target = line.split(" ", 1)[1]

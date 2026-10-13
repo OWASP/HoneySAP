@@ -48,7 +48,8 @@
   on an ABAP Platform system and filled with the system persona: logon page
   and sessions with configurable credentials (`FLP logon attempt` events),
   shell, catalogs, App Finder and apps, OData with CSRF tokens and `$batch`;
-  modifying requests are logged and refused. New `static_assets` logging
+  queries not recorded (paging, sorting, filters, other objects) are answered
+  from the recorded entity sets; modifying requests are logged and refused. New `static_assets` logging
   option ([@randomstr1ng](https://github.com/randomstr1ng)).
 
 - HTTP services: Request events add decoded query, form and JSON
