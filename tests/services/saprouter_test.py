@@ -935,14 +935,52 @@ class SAPRouterHandlerTest(unittest.TestCase):
         request = SAPRouter(type=SAPRouter.SAPROUTER_ADMIN, version=40,
                             adm_command=2, adm_password=b"synthetic-secret\x00")
         handler.handle_admin(request)
-        event, = handler.session.add_event.call_args_list[0].args
-        data = handler.session.add_event.call_args_list[0].kwargs["data"]
-        self.assertEqual(event, "SAPRouter admin authentication attempt")
+        call, = [call for call in handler.session.add_event.call_args_list
+                 if call.args == ("SAPRouter admin authentication attempt",)]
+        data = call.kwargs["data"]
         self.assertEqual(data["password"], "synthetic-secret")
         self.assertEqual(data["password_raw"], b"synthetic-secret\x00")
         self.assertEqual(data["outcome"], "rejected")
-        self.assertEqual(handler.session.add_event.call_args_list[0].kwargs["request"],
-                         bytes(request))
+        self.assertEqual(call.kwargs["request"], bytes(request))
+
+    def test_route_events_carry_the_whole_route(self):
+        handler = self.make_router_handler()
+        handler.raw_request = b"raw"
+        hops = [SAPRouterRouteHop(hostname="127.0.0.1", port="3299"),
+                SAPRouterRouteHop(hostname="10.0.0.5", port="3299", password="hop1"),
+                SAPRouterRouteHop(hostname="10.0.0.100", port="3200", password="s3cret")]
+        request = SAPRouter(type=SAPRouter.SAPROUTER_ROUTE, route_ni_version=40,
+                            route_entries=3, route_rest_nodes=1,
+                            route_length=sum(len(bytes(hop)) for hop in hops),
+                            route_offset=len(bytes(hops[0])), route_string=hops)
+        handler.handle_route(SAPRouter(bytes(request)))
+        name, = handler.session.add_event.call_args_list[0].args
+        data = handler.session.add_event.call_args_list[0].kwargs["data"]
+        self.assertEqual(name, "Route request")
+        self.assertEqual(data["route"],
+                         "/H/127.0.0.1/S/3299/H/10.0.0.5/S/3299/W/hop1/H/10.0.0.100/S/3200/W/s3cret")
+        self.assertEqual([hop["password"] for hop in data["hops"]], ["", "hop1", "s3cret"])
+        self.assertEqual((data["talk_mode"], data["ni_version"], data["rest_nodes"]), (0, 40, 1))
+
+    def test_admin_events_name_the_command(self):
+        handler = self.make_router_handler()
+        handler.raw_request = b"raw"
+        handler.config.update({"external_admin": True})
+        for packet, expected in [
+                (SAPRouter(type=SAPRouter.SAPROUTER_ADMIN, adm_command=5),
+                 {"admin_command": {"code": 5, "name": "Stop Request"}}),
+                (SAPRouter(type=SAPRouter.SAPROUTER_ADMIN, adm_command=6, adm_client_ids=[3, 9]),
+                 {"admin_command": {"code": 6, "name": "Cancel Route Request"},
+                  "client_ids": [3, 9]}),
+                (SAPRouter(type=SAPRouter.SAPROUTER_ADMIN, adm_command=10,
+                           adm_address_mask="10.1.2.3"),
+                 {"admin_command": {"code": 10, "name": "Set Trace Peer"},
+                  "address_mask": "10.1.2.3"})]:
+            handler.session.reset_mock()
+            handler.handle_admin(SAPRouter(bytes(packet)))
+            call = handler.session.add_event.call_args_list[0]
+            self.assertEqual((call.args[0], call.kwargs["data"]), ("Admin request", expected))
+
 
 def test_suite():
     loader = unittest.TestLoader()

@@ -93,7 +93,10 @@ client number.
 **Infrastructure call handling**
 
 The following SDK-internal calls are answered automatically and logged at
-INFO level:
+INFO level. Their import parameters are logged like those of business calls:
+``FUNCNAME`` of ``RFC_GET_FUNCTION_INTERFACE`` and ``TABNAME`` of
+``DDIF_FIELDINFO_GET`` and ``RFC_GET_STRUCTURE_DEFINITION`` show what a client
+prepares to call.
 
 - ``RFC_PING`` — answered with the generic success response; used by clients
   as a connectivity check.
@@ -369,15 +372,6 @@ The ``cpic_username2`` TLV (marker ``0x0009``) carries the client's OS user
 and is sent by the NWRFC SDK, but is absent in some older SAP GUI and
 non-NWRFC clients.  When absent, ``os_username`` is not populated in the
 RFC login event.
-
-**Late-attached event fields**
-
-``conversation_id`` in ``APPC init conversation``, ``target_function`` in
-``RFC function call``, and the ``sloae_deploy`` data in the ``RFC function
-call`` event for ``/SLOAE/DEPLOY`` are added after the event has been
-queued.  Whether a feed sees them depends on timing, so they may be missing.
-Use the ``conversation_id`` of the following ``F_SAP_SEND`` events and the
-separate ``SLOAE deploy payload`` event instead.
 
 **Large structures**
 

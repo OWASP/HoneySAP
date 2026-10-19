@@ -273,6 +273,55 @@ a feed is paused for ``feed_retry_seconds`` (default ``60``) before delivery is
 retried. Feed and service configurations receive only their own settings and
 safe shared defaults; sibling credentials are not propagated.
 
+.. _log-feed:
+
+Log file feed
+'
+
+``LogFeed`` writes one line per event to ``log_filename``. By default the file
+is re-opened when it is renamed, so external rotation (``logrotate`` without
+``copytruncate``) loses no lines. The feed can also rotate the file itself, by
+size (``max_bytes``) or by time (``rotate_when``, the ``when`` values of
+Python's ``TimedRotatingFileHandler`` such as ``midnight`` or ``H``), keeping
+``backup_count`` old files (default ``5``):
+
+.. code-block:: yaml
+
+   feeds:
+     - feed: LogFeed
+       log_filename: logs/honeysap.log
+       # Rotate at 100 MB, keep 10 files
+       max_bytes: 104857600
+       backup_count: 10
+
+.. _metrics:
+
+Metrics
+'
+
+The counters of the event pipeline (accepted, dropped and queued events,
+processed events, feed deliveries, drops, errors and pauses, retained and
+evicted sessions and campaigns) are logged every ``interval`` seconds as a
+``Metrics`` record with a JSON body, in the log and console feeds and the
+application log (``INFO``). Events dropped since the previous record are
+reported as a warning. ``interval: 0`` disables the records; the last values
+are also logged at shutdown.
+
+With ``prometheus`` enabled the counters are served in the Prometheus text
+format on ``/metrics``, e.g. ``honeysap_events_dropped_total`` and
+``honeysap_feed_queue_size{feed="LogFeed-1"}``. Keep the listener on a
+management address; it is not part of the honeypot's attack surface.
+
+.. code-block:: yaml
+
+   metrics:
+     # Seconds between Metrics records (default 300, 0 disables them)
+     interval: 300
+     prometheus:
+       enabled: no
+       listener_address: 127.0.0.1
+       listener_port: 9180
+
 
 SAP instance configuration
 ''''''''''''''''''''''''''
