@@ -46,6 +46,9 @@ class Session(Loggeable):
         self.campaign_uuid = campaign_uuid or uuid4()
         self.parent_session_uuid = parent_session_uuid
         self.enqueue = enqueue
+        # Set per accepted connection by the service handler
+        self.connection_id = None
+        self.logging_policy = None
         self.sequence = 0
         self.created_at = monotonic()
         self.last_activity = self.created_at
@@ -65,6 +68,7 @@ class Session(Loggeable):
             event = Event(original.event, data=deepcopy(original.data),
                           request=original.request, response=original.response)
             event.timestamp = original.timestamp
+        self._apply_logging_policy(event)
         event.session = self
         self.sequence += 1
         event.sequence = self.sequence
@@ -74,6 +78,25 @@ class Session(Loggeable):
             return self.enqueue(event)
         self.event_queue.put(event)
         return True
+
+
+    def _apply_logging_policy(self, event):
+        """Drop or truncate raw payloads according to the service policy,
+        recording the original size in the event data."""
+        policy = self.logging_policy
+        if policy is None:
+            return
+        for field in ("request", "response"):
+            value, size, truncated = policy.payload(getattr(event, field))
+            if size is None:
+                continue
+            setattr(event, field, value)
+            if event.data is None:
+                event.data = {}
+            if isinstance(event.data, dict):
+                event.data["%s_size" % field] = size
+                if truncated:
+                    event.data["%s_truncated" % field] = True
 
 
 class SessionManager(Loggeable):

@@ -2,6 +2,71 @@
 
 ## v0.2.1.dev0 - in dev
 
+### Enhancements and improvements
+
+- `honeysap/core/`: Events carry the raw bytes received and sent on the wire
+  instead of a packet summary, plus a `connection_id` per TCP connection
+  (event schema version 2). New `logging:` options, global and per service,
+  control raw payloads, payload size cap, response and connection events
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
+- SAP NI services (Dispatcher, Gateway, Message Server, SAPRouter): Added
+  `Received packet`, `Sent packet`, `Unparsed input`, and `Connection
+  opened`/`Connection closed` events; input that fails to decode or crashes a
+  handler is now recorded with its raw bytes instead of being dropped
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
+- HTTP services (ICM, Message Server HTTP): New HTTP front end reading the
+  raw socket. Requests are logged with exact request/response bytes, all
+  headers in order, body and multipart parts; non-HTTP input and TLS
+  ClientHellos (with JA3/JA4) are logged; one session per connection with the
+  real source port. Optional HTTPS listener (`tls:`) with a generated
+  SAP-style certificate. Non-HTTP input is answered like the ICM (400 page)
+  and Message Server (close). The Message Server HTTP events are now a single
+  `MS HTTP request` event with `action`
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
+
+- `honeysap/core/persona.py`: New `system:` configuration describing the
+  emulated SAP system; Gateway (`RFC_SYSTEM_INFO`), Dispatcher, ICM and
+  Message Server report the same identity. `RFCMACH`/`RFCTZONE` are
+  right-aligned like on a real system
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
+- ICM: Responses modeled on an ABAP Platform ICM (header names, case and
+  order, error pages, `sap-usercontext` cookie). New ICF service dispatch with
+  `/sap/public/ping`, `/sap/public/info`, `/sap/public/icman/ping`, logoff and
+  ICM admin redirect; `auth` services answer 401 and log submitted Basic
+  credentials (`ICM authentication attempt`). HTTPS mimics the ICM TLS setup
+  (certificate chain, TLS 1.2, cipher order), `mimic_icm` to opt out
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
+- Message Server HTTP: All `/msgserver` commands (application server and
+  logon group lists, logon data versions 1.0-1.3, group details) answered
+  like the Message Server; other paths redirect with 307. The hidden
+  `parameter` command answers profile parameter queries with values of a real
+  ASCS instance, configurable with `profile_parameters`. Flask is no longer
+  a dependency
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
+
+- ICM: SAP Fiori launchpad (`fiori_launchpad`) replayed from a bundle recorded
+  on an ABAP Platform system and filled with the system persona: logon page
+  and sessions with configurable credentials (`FLP logon attempt` events),
+  shell, catalogs, App Finder and apps, OData with CSRF tokens and `$batch`;
+  queries not recorded (paging, sorting, filters, other objects) are answered
+  from the recorded entity sets, invalid ones get SAP Gateway errors (JSON or
+  XML); modifying requests are logged and refused. Sessions are capped
+  (`max_sessions`). New `static_assets` logging
+  option ([@randomstr1ng](https://github.com/randomstr1ng)).
+
+- HTTP services: Request events add decoded query, form and JSON
+  parameters, SHA-256 of uploaded files, proxy headers and `tags` for known
+  SAP attack patterns (Visual Composer CVE-2025-31324, RECON CVE-2020-6287,
+  request smuggling, path traversal, ...); credentials sent as parameters on
+  any path produce `HTTP credentials submitted` events. New `http_params`
+  logging option ([@randomstr1ng](https://github.com/randomstr1ng)).
+
+### Bug fixes
+
+- Virtual HTTP services no longer bind sockets, so `profiles/external.yml`
+  starts without the virtual addresses being local
+  ([@randomstr1ng](https://github.com/randomstr1ng)).
+
 ## v0.2.0 - 2026-10-06
 
 ### New features

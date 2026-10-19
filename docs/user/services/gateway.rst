@@ -166,7 +166,10 @@ Session events
 
 The following named events are emitted to configured feeds (log file,
 HPFeed, etc.) and can be used for SIEM alerting.  Every received packet
-additionally produces a ``Received packet`` event.
+additionally produces a ``Received packet`` event with the raw bytes; see
+:ref:`Evidence logging <evidence-logging>` for the common evidence events.
+Payloads too short to carry a gateway header produce ``Unparsed input`` with
+``stage: short_payload``.
 
 **RFC client events**
 

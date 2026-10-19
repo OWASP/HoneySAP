@@ -33,6 +33,7 @@ from pysap.SAPDiagItems import (support_data_sapnw_702, SAPDiagAreaSize,
                                 SAPDiagStep, SAPDiagSES)
 # Custom imports
 from honeysap.core.logger import Loggeable
+from honeysap.core.evidence import EvidenceHandlerMixin
 from honeysap.core.service import BaseTCPService
 
 
@@ -47,19 +48,19 @@ class SAPDispatcherClient(Loggeable, SAPNIClient):
     init = False
 
 
-class SAPDispatcherServerHandler(Loggeable, SAPNIServerHandler):
+class SAPDispatcherServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandler):
 
     @property
     def hostname(self):
-        return self.config.get("hostname", "sapnw702")
+        return self.server.persona.hostname
 
     @property
     def client_no(self):
-        return self.config.get("client_no", "001")
+        return self.server.persona.client
 
     @property
     def sid(self):
-        return self.config.get("sid", "PRD")
+        return self.server.persona.sid
 
     @property
     def session_title(self):
@@ -91,8 +92,6 @@ class SAPDispatcherServerHandler(Loggeable, SAPNIServerHandler):
 
     def handle_data(self):
         """Handles a received packet"""
-        self.session.add_event("Received packet", request=str(self.packet))
-
         if self.client_address in self.server.clients and self.server.clients[self.client_address].init:
             self.logger.debug("Already initialized client %s" % str(self.client_address))
             self.handle_msg()
@@ -112,7 +111,7 @@ class SAPDispatcherServerHandler(Loggeable, SAPNIServerHandler):
             login_screen = SAPDiag(compress=0, message=self.make_login_screen())
             self.request.send(login_screen)
             self.session.add_event("Initialization request received", data={"terminal": self.packet[SAPDiagDP].terminal},
-                                   request=str(self.packet), response=str(login_screen))
+                                   request=self.raw_request, response=bytes(login_screen))
         else:
             self.logger.debug("Error during initialization of client %s" % str(self.client_address))
             self.logoff()
@@ -194,7 +193,7 @@ class SAPDispatcherServerHandler(Loggeable, SAPNIServerHandler):
 
             response = SAPDiag(compress=1, message=self.make_error_screen("E: Unable to process your request, try later"))
             self.logger.debug("Sending error message to client %s" % str(self.client_address))
-            self.session.add_event("Error message sent to the client", response=str(response))
+            self.session.add_event("Error message sent to the client", response=bytes(response))
             self.request.send(response)
 
         # Otherwise we send an error message
@@ -202,7 +201,7 @@ class SAPDispatcherServerHandler(Loggeable, SAPNIServerHandler):
             self.logger.debug("Sending error message to client %s" % str(self.client_address))
             try:
                 response = SAPDiag(compress=0, message=self.make_error_screen("E: Unable to process your request, try later"))
-                self.session.add_event("Error message sent to the client", response=str(response))
+                self.session.add_event("Error message sent to the client", response=bytes(response))
                 self.request.send(response)
             except error:
                 pass
@@ -496,7 +495,7 @@ class SAPDispatcherServerHandler(Loggeable, SAPNIServerHandler):
         try:
             response = SAPDiag(com_flag_TERM_EOP=1, com_flag_TERM_EOC=1, compress=0)
             self.request.send(response)
-            self.session.add_event("Loggoff client", response=str(response))
+            self.session.add_event("Loggoff client", response=bytes(response))
             self.request.close()
         except error:
             pass

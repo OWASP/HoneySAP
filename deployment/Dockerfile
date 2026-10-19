@@ -41,6 +41,6 @@ RUN python3 -m pip install . && \
 # SAP ICM (HTTP) : 8000
 # SAP Msg Server : 3600
 # SAP MS (HTTP)  : 8100
-EXPOSE 3200 3300 8000 3600 8100
+EXPOSE 3200 3300 8000 44300 3600 8100
 
 CMD ["/opt/honeysap-venv/bin/honeysap", "--config-file", "profiles/internal.yml"]

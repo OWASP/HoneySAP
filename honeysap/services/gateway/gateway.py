@@ -32,6 +32,7 @@ from pysap.SAPNWRFC import (find_tlv_field_by_marker, find_tlv_field_by_padd,
 from pysap.utils.crypto.rfc import ab_descramble
 # Custom imports
 from honeysap.core.logger import Loggeable
+from honeysap.core.evidence import EvidenceHandlerMixin
 from honeysap.core.service import BaseTCPService
 from honeysap.services.gateway.rfcsi_data import get_ddif_body
 from honeysap.services.gateway.rfm_catalog import load_rfm_catalog
@@ -962,23 +963,23 @@ class SAPGatewayClient(Loggeable, SAPNIClient):
     ddif_call_count = 0  # Tracks DDIF_FIELDINFO_GET call sequence (0-2)
 
 
-class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
+class SAPGatewayServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandler):
 
     @property
     def hostname(self):
-        return self.config.get("hostname", "sapnw702")
+        return self.persona.hostname
 
     @property
     def sid(self):
-        return self.config.get("sid", "PRD")
+        return self.persona.sid
 
     @property
     def instance_number(self):
-        return self.config.get("instance_number", "00")
+        return self.persona.instance_number
 
     @property
     def kernel_version(self):
-        return self.config.get("kernel_version", "7200")
+        return str(self.config.get("kernel_version", self.persona.kernel_release))
 
     @property
     def gateway_version(self):
@@ -990,15 +991,15 @@ class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
 
     @property
     def sap_release(self):
-        return self.config.get("sap_release", "752")
+        return self.persona.release
 
     @property
     def db_system(self):
-        return self.config.get("db_system", "HDB")
+        return self.persona.db_system
 
     @property
     def os_name(self):
-        return self.config.get("os_name", "Linux")
+        return self.persona.os
 
     def __init__(self, request, client_address, server):
         self.config = server.config
@@ -1032,17 +1033,17 @@ class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
 
     def handle_data(self):
         """Handles a received packet, dispatching by version/type."""
-        self.session.add_event("Received packet", request=str(self.packet))
-
         # With base_cls=None the NI payload is not auto-decoded as SAPRFC.
         # We extract raw bytes from the SAPNI "payload" field directly.
         try:
             raw = bytes(self.packet.payload)
-        except Exception:
+        except Exception as error:
             self.logger.debug("Failed to get payload bytes from %s",
                               str(self.client_address))
+            self.record_unparsed(error, "ni_payload")
             return
         if len(raw) < 2:
+            self.record_unparsed(None, "short_payload")
             return
 
         try:
@@ -2324,34 +2325,15 @@ class SAPGatewayServerHandler(Loggeable, SAPNIServerHandler):
                 return name
         return None
 
+    @property
+    def persona(self):
+        return self.server.persona
+
     def _build_rfcsi_string(self):
-        """Build the 245-character RFCSI structure string with honeypot
-        system information."""
-        server_ip = self.server.server_address[0] or "127.0.0.1"
-        dest = "%s_%s_%s" % (self.hostname, self.sid, self.instance_number)
-        krel = self.kernel_version[:3]
-        values = {
-            "RFCPROTO": "011",
-            "RFCCHARTYP": "4103",
-            "RFCINTTYP": "LIT",
-            "RFCFLOTYP": "IE3",
-            "RFCDEST": dest,
-            "RFCHOST": self.hostname[:8],
-            "RFCSYSID": self.sid,
-            "RFCDATABS": self.sid,
-            "RFCDBHOST": self.hostname,
-            "RFCDBSYS": self.db_system,
-            "RFCSAPRL": self.sap_release,
-            "RFCMACH": "390",
-            "RFCOPSYS": self.os_name,
-            "RFCTZONE": "7200",
-            "RFCDAYST": "",
-            "RFCIPADDR": server_ip,
-            "RFCKERNRL": krel,
-            "RFCHOST2": self.hostname,
-            "RFCSI_RESV": "",
-            "RFCIPV6ADDR": server_ip,
-        }
+        """Build the 245-character RFCSI structure string from the system
+        persona."""
+        values = dict(self.persona.rfcsi(self.server.server_address[0]))
+        values["RFCKERNRL"] = self.kernel_version[:3]
         result = ""
         for name, width in _RFCSI_FIELDS:
             result += values.get(name, "").ljust(width)[:width]

@@ -21,11 +21,51 @@ reload: false
 listener_address: 0.0.0.0
 
 
-# SAP instance configuration
-# --------------------------
+# Evidence logging
+# ----------------
+# Global defaults; a service can override single options in its own
+# "logging:" mapping.
+logging:
+    # Keep the bytes received/sent on the wire in request/response
+    raw_payloads: true
+    # Emit a "Sent packet" event with the bytes sent for each request
+    response_events: true
+    # Cap for each request/response field in bytes (0 = no cap)
+    max_payload_bytes: 65536
+    # Connection lifecycle events: none, close or all
+    connection_events: close
+    # Emit "Unparsed input" for data that cannot be decoded or handled
+    unparsed_input: true
+    # HTTP services: log all request headers in order
+    http_headers: true
+    # HTTP services: log the request body
+    http_body: true
+    # HTTP services: log static resources (UI5 files of the launchpad)
+    static_assets: false
+    # HTTP services: decode parameters and report submitted credentials
+    http_params: true
 
-# Release version
-release: "720"
+
+# SAP system configuration
+# ------------------------
+# Identity of the emulated system, reported the same way by all services.
+# Service options with the same meaning (hostname, sid, instance_number,
+# client_no, sap_release, db_system, os_name) override these values.
+
+system:
+    sid: PRD
+    hostname: sapnw702
+    instance_number: "00"
+    client: "001"
+    # Logon language (error pages, logon screens)
+    language: EN
+    # SAP_BASIS release and kernel release
+    release: "816"
+    kernel_release: "916"
+    db_system: HDB
+    os: Linux
+    # Address reported to clients; defaults to the address they connected to
+    # ip_address: 192.0.2.10
 
 
 # Services configuration
@@ -40,18 +80,6 @@ services:
         enabled: yes
         listener_port: 3200
 
-        # Name of the instance
-        instance: NSP
-        
-        # Client number
-        client_no: "001"
-        
-        # SID
-        sid: PRD
-        
-        # Hostname
-        hostname: sapnw702
-
     -
         # SAP Gateway service
         # -------------------
@@ -60,9 +88,6 @@ services:
         enabled: yes
         listener_port: 3300
         listener_address: 0.0.0.0
-        hostname: sapnw702
-        sid: PRD
-        instance_number: "00"
 
         # Optional: path to a semicolon-delimited RFM catalog CSV (exported
         # from SAP with columns FUNCNAME;REMOTE_CALL;UPDATE_TASK;...PARAMTEXT).
@@ -81,8 +106,32 @@ services:
         alias: ICMService
         enabled: yes
         listener_port: 8000
-        release: "720"
-        hostname: sapnw702
+        # Fiori launchpad over HTTP; require_https: yes answers
+        # "403 Forbidden - SSL required" like an ICM instead
+        fiori_launchpad:
+            enabled: yes
+            bundle: data/icm/flp/flp_bundle.tar.xz
+            require_https: no
+
+    -
+        # SAP ICM (HTTPS) service
+        # -----------------------
+        service: SAPICMService
+        alias: ICMHTTPSService
+        enabled: yes
+        listener_port: 44300
+        tls:
+            enabled: yes
+            # Without cert_file/key_file a certificate is generated at
+            # startup; mimic_icm copies the ICM TLS behavior
+            mimic_icm: yes
+        # SAP Fiori launchpad, see docs/user/services/icm.rst
+        fiori_launchpad:
+            enabled: yes
+            bundle: data/icm/flp/flp_bundle.tar.xz
+            # list (default credentials or "credentials:"), accept_any or
+            # reject_all
+            auth_mode: list
 
     -
         # SAP Message Server (TCP) service
@@ -99,11 +148,12 @@ services:
         alias: MessageServerHTTPService
         enabled: yes
         listener_port: 8100
-        release: 720
-        instance: PRD
-        hostname: sapnw702
         # Redirect clients to the ICM authority they used to reach this service.
         redirect_hostname: request
+        # Values answered by /msgserver/*/parameter on top of the built-in
+        # ones (null removes a parameter)
+        # profile_parameters:
+        #     login/min_password_lng: 6
 
 
 # Feeds configuration

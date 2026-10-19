@@ -29,9 +29,9 @@ from uuid import uuid4
 class Event(object):
     """An object representing an attack session event"""
 
-    # This is the first explicit event schema; older event consumers had no
-    # schema contract to preserve.
-    schema_version = 1
+    # Version 2: request/response carry the raw wire bytes and events include
+    # the connection_id of the TCP connection they were observed on.
+    schema_version = 2
 
     def __init__(self, event, data=None, request=None, response=None,
                  session=None):
@@ -112,6 +112,9 @@ class Event(object):
                            "parent_session": (
                                str(self.session.parent_session_uuid)
                                if self.session.parent_session_uuid else ""),
+                           "connection_id": (
+                               str(self.session.connection_id)
+                               if getattr(self.session, "connection_id", None) else ""),
                            "event": self.event,
                            "data": self._serialize_data(self.data),
                            "request": self._encode_field(self.request),

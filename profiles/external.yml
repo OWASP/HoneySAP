@@ -19,6 +19,31 @@ reload: false
 # Address to listen for all services
 listener_address: 0.0.0.0
 
+# Evidence logging
+# ----------------
+# Global defaults; a service can override single options in its own
+# "logging:" mapping.
+logging:
+    # Keep the bytes received/sent on the wire in request/response
+    raw_payloads: true
+    # Emit a "Sent packet" event with the bytes sent for each request
+    response_events: true
+    # Cap for each request/response field in bytes (0 = no cap)
+    max_payload_bytes: 65536
+    # Connection lifecycle events: none, close or all
+    connection_events: close
+    # Emit "Unparsed input" for data that cannot be decoded or handled
+    unparsed_input: true
+    # HTTP services: log all request headers in order
+    http_headers: true
+    # HTTP services: log the request body
+    http_body: true
+    # HTTP services: log static resources (UI5 files of the launchpad)
+    static_assets: false
+    # HTTP services: decode parameters and report submitted credentials
+    http_params: true
+
+
 # SAP instance configuration
 # --------------------------
 
