@@ -25,6 +25,7 @@ from pysap.SAPNI import SAPNIServerThreaded, SAPNIServerHandler
 # Custom imports
 from .logger import Loggeable
 from .loader import ClassLoader
+from .evidence import LoggingPolicy
 
 
 WORKER_STOP_TIMEOUT = 2
@@ -64,6 +65,7 @@ class BaseService(Loggeable, metaclass=ABCMeta):
         self.datastore = datastore
         self.session_manager = session_manager
         self.service_manager = service_manager
+        self.logging_policy = LoggingPolicy.from_config(config)
 
         # If a custom alias was defined, use that as a logger name, otherwise
         # use the default (class name)
@@ -115,6 +117,7 @@ class BaseTCPService(BaseService):
         self.server.datastore = self.datastore
         self.server.session_manager = self.session_manager
         self.server.service_manager = self.service_manager
+        self.server.logging_policy = self.logging_policy
 
         # Only bind and activate the server if not virtual, in that case
         # we would be passing the client's socket from other service. This

@@ -279,8 +279,15 @@ class Configuration(Values):
         for item in getattr(self, category):
             if name in item and item[name] == classname:
                 item_config = Configuration()
-                item_config.update(self._component_defaults(category))
+                defaults = self._component_defaults(category)
+                item_config.update(defaults)
                 item_config.update(item)
+                # A component's logging mapping overrides the global one
+                # option by option instead of replacing it.
+                if isinstance(defaults.get("logging"), dict) and \
+                   isinstance(item.get("logging"), dict):
+                    item_config.logging = dict(defaults["logging"],
+                                               **item["logging"])
                 del(item_config["_config_files"])
                 config.append(item_config)
         return config

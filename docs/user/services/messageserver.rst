@@ -33,6 +33,9 @@ a ``MS packet received`` event containing:
 Invalid packets (missing SAPMS layer) are logged as ``Invalid packet
 received`` events and answered with an empty SAPMS response to keep the
 client connected.
+Frames too short to decode as SAPMS are logged as ``Unparsed input`` with
+``stage: decode`` and the raw bytes (see :ref:`Evidence logging
+<evidence-logging>`).
 
 
 Configuration options

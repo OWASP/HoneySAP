@@ -35,6 +35,7 @@ from pysap.SAPRouter import (SAPRouter, SAPRouterError, SAPRouterInfoClient,
                              router_is_route, SAPRouterInfoServer)
 # Custom imports
 from honeysap.core.logger import Loggeable
+from honeysap.core.evidence import EvidenceHandlerMixin
 from honeysap.core.service import BaseTCPService
 
 from .routetable import RouteTable
@@ -65,7 +66,7 @@ class SAPRouterClient(Loggeable, SAPNIClient):
     connected_on = None
 
 
-class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
+class SAPRouterServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandler):
 
     @property
     def hostname(self):
@@ -143,7 +144,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
 
     def setup(self):
         """Add the client to the current client lists"""
-        SAPNIServerHandler.setup(self)
+        super(SAPRouterServerHandler, self).setup()
         self.server.clients_count += 1
         self.server.clients[self.client_address].id = self.server.clients_count
         self.server.clients[self.client_address].address = self.client_address[0]
@@ -152,7 +153,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
     def finish(self):
         """Closes the connection and deletes the client from the clients list"""
         self.close()
-        SAPNIServerHandler.finish(self)
+        super(SAPRouterServerHandler, self).finish()
 
     def handle(self):
         """Handle data from the client. Treat timeouts inside the handle method"""
@@ -168,27 +169,40 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
                 if self.server.clients[self.client_address].routed:
                     # In that case we should treat the request as routed,
                     # and do not handle further packets from this client
+                    self.flush_sent()
+                    self.close_reason = "routed"
                     self.handle_routed()
                     break
 
                 else:
                     # Otherwise, we should expect for a route request within the timeout
                     # defined. Receive and store the packet
-                    self.packet = self.request.recv()
+                    if not self.receive_packet():
+                        break
                     # Pass the control to the handle_data function
-                    self.handle_data()
+                    try:
+                        self.handle_data()
+                    except Exception as error:
+                        self.record_unparsed(error, "handle_data")
+                        self.close_reason = "error"
+                        break
+                    finally:
+                        self.flush_sent()
 
         # Scapy raises EOFError for a clean peer close. Older installed pysap
         # releases do not consume it in virtual NI handlers, so the router
         # must also treat it as a normal routed-client disconnect.
         except (OSError, EOFError):
             self.logger.debug("Client %s disconnected", self.client_address)
+            if self.close_reason is None:
+                self.close_reason = "client_close"
 
         except Timeout as t:
             # If this is another timeout, raise it so another block can
             # catch it
             if t is not self._timeout:
                 raise t
+            self.close_reason = "timeout"
             self.handle_timeout()
 
         finally:
@@ -196,8 +210,6 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
 
     def handle_data(self):
         """Handles a received packet"""
-        self.session.add_event("Received packet", request=str(self.packet))
-
         packet_length = (len(bytes(self.packet.payload)) if SAPNI in self.packet
                          else len(bytes(self.packet)))
         limit = self.error_profile["max_request_length"]
@@ -290,9 +302,10 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
         self.emit_profile_error("invalid_route", reason=reason)
         return False
 
-    @staticmethod
-    def _event_request(packet):
+    def _event_request(self, packet):
         """Preserve the complete received packet in an authentication event."""
+        if self.raw_request is not None:
+            return self.raw_request
         try:
             return bytes(packet)
         except Exception:
@@ -557,7 +570,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
         info_clients = b"".join([bytes(client) for client in info_clients])
         info_pkt = Raw(info_clients)
         self.request.send(info_pkt)
-        self.session.add_event("Returned information request", response=str(info_pkt))
+        self.session.add_event("Returned information request", response=bytes(info_pkt))
 
         __, server_port = self.server.server_address
 
@@ -569,22 +582,22 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
         hexdump(info_pkt)
         self.request.send(info_pkt)
         self.session.add_event("Returned information request", data={"packet": "info_packet"},
-                               response=str(info_pkt))
+                               response=bytes(info_pkt))
 
         info_pkt = Raw(("Total no. of clients: %d\x00" % len(self.server.clients)).encode())
         self.request.send(info_pkt)
         self.session.add_event("Returned information request", data={"packet": "total_no_clients"},
-                               response=str(info_pkt))
+                               response=bytes(info_pkt))
 
         info_pkt = Raw(("Working directory   : %s\x00" % self.route_table_working_directory).encode())
         self.request.send(info_pkt)
         self.session.add_event("Returned information request", data={"packet": "working_directory"},
-                               response=str(info_pkt))
+                               response=bytes(info_pkt))
 
         info_pkt = Raw(("Routtab             : %s\x00" % self.route_table_filename).encode())
         self.request.send(info_pkt)
         self.session.add_event("Returned information request", data={"packet": "routtab"},
-                               response=str(info_pkt))
+                               response=bytes(info_pkt))
 
         # Send a zero-length NI packet as end-of-data terminator
         self.request.send(Raw(b""))
@@ -621,7 +634,7 @@ class SAPRouterServerHandler(Loggeable, SAPNIServerHandler):
         self.session.add_event("Returned error",
                                data={"return_code": options.get("return_code"),
                                      "error_msg": router_return_codes.get(options.get("return_code"), "unknown")},
-                               response=str(error_pkt))
+                               response=bytes(error_pkt))
         if profile["error_count"]["enabled"] and count_after:
             self.advance_error_count(count_after)
 

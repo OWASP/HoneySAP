@@ -28,6 +28,7 @@ from pysap.SAPMS import (SAPMS, SAPMSPayload, SAPMSPeerPayload,
 from pysap.SAPNI import SAPNIServerThreaded, SAPNIServerHandler, SAPNIClient
 # Custom imports
 from honeysap.core.logger import Loggeable
+from honeysap.core.evidence import EvidenceHandlerMixin
 from honeysap.core.service import BaseTCPService
 
 
@@ -35,7 +36,7 @@ class SAPMSClient(SAPNIClient):
     pass
 
 
-class SAPMSServerHandler(Loggeable, SAPNIServerHandler):
+class SAPMSServerHandler(Loggeable, EvidenceHandlerMixin, SAPNIServerHandler):
 
     def __init__(self, request, client_address, server):
         Loggeable.__init__(self)
@@ -84,7 +85,7 @@ class SAPMSServerHandler(Loggeable, SAPNIServerHandler):
 
             self.session.add_event("MS packet received",
                                    data=data,
-                                   request=str(self.packet))
+                                   request=self.raw_request)
 
         except timeout:
             self.logger.debug("Timeout connection from %s", self.client_address)

@@ -118,6 +118,66 @@ The following configuration options are related to the console logging output:
     colored_console: true
 
 
+.. _evidence-logging:
+
+Evidence logging
+''''''''''''''''
+
+The ``logging:`` mapping controls how much raw evidence the services attach to
+events. Set it at the top level for all services and override single options
+in a service's own ``logging:`` mapping; the remaining options keep their
+global values. The defaults keep the evidence and leave out the noisiest
+events:
+
+.. code-block:: yaml
+
+   logging:
+     # Keep the bytes received and sent on the wire in request/response
+     raw_payloads: true
+     # Emit a "Sent packet" event with the bytes sent for each request
+     response_events: true
+     # Cap for each request/response field in bytes; 0 disables the cap
+     max_payload_bytes: 65536
+     # Connection lifecycle events: none, close, or all (open and close)
+     connection_events: close
+     # Emit "Unparsed input" when received data cannot be decoded or handled
+     unparsed_input: true
+
+   services:
+     - service: SAPGatewayService
+       # Keep complete RFC payloads for this service only
+       logging:
+         max_payload_bytes: 0
+
+When a payload is cut, the event data gets ``request_truncated: true`` (or
+``response_truncated``); ``request_size`` and ``response_size`` always record
+the original length. With ``raw_payloads: false`` only the sizes are kept.
+
+The SAP NI services (Dispatcher, Gateway, Message Server, and SAPRouter) emit
+these events in addition to their protocol events:
+
+``Received packet``
+    One per received packet. ``request`` holds the exact bytes received,
+    including the NI length header; ``data.summary`` is the decoded layer
+    summary.
+
+``Sent packet``
+    The bytes sent back while handling a packet (``response_events``).
+
+``Unparsed input``
+    Input that failed to decode or crashed the handler. ``request`` holds the
+    raw bytes, ``data.stage`` where it failed (``recv`` for a connection
+    closed mid-packet, ``decode``, ``handle_data``, or a service-specific
+    stage), ``data.error`` the exception, and ``data.service_state`` the
+    protocol state. The connection is closed afterwards, as before.
+
+``Connection opened`` / ``Connection closed``
+    The connection lifecycle (``connection_events``). ``Connection closed``
+    records ``duration_seconds``, ``bytes_in``, ``bytes_out``, ``packets_in``
+    and ``close_reason`` (``client_close``, ``timeout``, ``error``,
+    ``server_close`` or ``routed``), so clients that connect without sending
+    data are visible too.
+
 Miscellaneous
 '''''''''''''
 
@@ -184,10 +244,14 @@ Reading event contents
 
 Use ``service`` and ``event`` to identify the protocol observation, then read
 ``data`` for decoded fields specific to that event. ``request`` and
-``response`` retain the captured wire evidence as base64 text; decode them
-only when the event fields do not answer the investigation question. The
+``response`` retain the exact bytes received and sent on the wire as base64
+text (see :ref:`Evidence logging <evidence-logging>`); decode them when the
+event fields do not answer the investigation question, or to re-parse traffic
+HoneySAP does not model. ``connection_id`` identifies the TCP connection an
+event was observed on, for matching events to packet captures. The
 ``schema_version`` identifies the event format, while ``event_id`` identifies
-one emitted record.
+one emitted record. Schema version 2 changed ``request``/``response`` from a
+packet summary to the raw bytes and added ``connection_id``.
 
 Service documentation lists its named events and detection-specific fields.
 Treat them as observations of an attempted action, not proof that a target
